@@ -29,9 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.batonec.trainer.domain.workout.GroupedExerciseSet
 import com.batonec.trainer.domain.workout.groupConsecutiveExerciseSets
+import androidx.hilt.navigation.compose.hiltViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -39,7 +39,7 @@ import java.util.*
 @Composable
 fun TrainingsScreen(
     modifier: Modifier = Modifier,
-    viewModel: TrainingsViewModel = viewModel()
+    viewModel: TrainingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()

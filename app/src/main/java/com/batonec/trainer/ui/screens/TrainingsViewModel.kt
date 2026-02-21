@@ -3,12 +3,13 @@ package com.batonec.trainer.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.batonec.trainer.data.model.Workout
-import com.batonec.trainer.data.repository.RepositoryProvider
 import com.batonec.trainer.data.repository.WorkoutRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 data class TrainingsUiState(
     val workouts: List<Workout> = emptyList(),
@@ -18,9 +19,10 @@ data class TrainingsUiState(
     val isLoadingMore: Boolean = false
 )
 
-class TrainingsViewModel : ViewModel() {
-    private val workoutRepository: WorkoutRepository = RepositoryProvider.workoutRepository
-
+@HiltViewModel
+class TrainingsViewModel @Inject constructor(
+    private val workoutRepository: WorkoutRepository
+) : ViewModel() {
     private val _uiState = MutableStateFlow(TrainingsUiState())
     val uiState: StateFlow<TrainingsUiState> = _uiState.asStateFlow()
 

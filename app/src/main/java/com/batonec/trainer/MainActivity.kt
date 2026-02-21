@@ -23,7 +23,9 @@ import com.batonec.trainer.ui.screens.NextScreen
 import com.batonec.trainer.ui.screens.NewWorkoutScreen
 import com.batonec.trainer.ui.screens.TrainingsScreen
 import com.batonec.trainer.ui.theme.TrainerTheme
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

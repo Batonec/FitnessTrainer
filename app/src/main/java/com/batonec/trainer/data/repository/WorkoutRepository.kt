@@ -1,6 +1,5 @@
 package com.batonec.trainer.data.repository
 
-import com.batonec.trainer.data.api.RetrofitClient
 import com.batonec.trainer.data.api.WorkoutApiService
 import com.batonec.trainer.data.model.Workout
 
@@ -10,7 +9,7 @@ interface WorkoutRepository {
 }
 
 class DefaultWorkoutRepository(
-    private val apiService: WorkoutApiService = RetrofitClient.workoutApiService
+    private val apiService: WorkoutApiService
 ) : WorkoutRepository {
     // Кеш истории тренировок (не персистентный, живет пока процесс приложения активен)
     private var cachedWorkouts: List<Workout> = emptyList()

@@ -20,14 +20,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.batonec.trainer.domain.workout.groupWorkoutSetsByWeightAndReps
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewWorkoutScreen(
     modifier: Modifier = Modifier,
-    viewModel: NewWorkoutViewModel = viewModel()
+    viewModel: NewWorkoutViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -438,4 +438,3 @@ fun SetCard(
         }
     }
 }
-

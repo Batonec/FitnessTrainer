@@ -2,15 +2,16 @@ package com.batonec.trainer.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.batonec.trainer.data.api.RetrofitClient
+import com.batonec.trainer.data.api.WorkoutApiService
 import com.batonec.trainer.data.model.ApiExercise
-import com.batonec.trainer.data.repository.RepositoryProvider
 import com.batonec.trainer.data.repository.WorkoutRepository
 import com.batonec.trainer.domain.workout.WorkoutHistoryAnalyzer
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 data class NewWorkoutSet(
     val reps: Int = 12,
@@ -36,9 +37,11 @@ data class NewWorkoutUiState(
     val workoutExercises: List<NewWorkoutExercise> = emptyList()
 )
 
-class NewWorkoutViewModel : ViewModel() {
-    private val workoutRepository: WorkoutRepository = RepositoryProvider.workoutRepository
-
+@HiltViewModel
+class NewWorkoutViewModel @Inject constructor(
+    private val workoutRepository: WorkoutRepository,
+    private val workoutApiService: WorkoutApiService
+) : ViewModel() {
     private val _uiState = MutableStateFlow(NewWorkoutUiState())
     val uiState: StateFlow<NewWorkoutUiState> = _uiState.asStateFlow()
 
@@ -51,7 +54,7 @@ class NewWorkoutViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingExercises = true, error = null)
             try {
-                val response = RetrofitClient.workoutApiService.getExercises()
+                val response = workoutApiService.getExercises()
                 _uiState.value = _uiState.value.copy(
                     exercises = response.exercises,
                     isLoadingExercises = false,
