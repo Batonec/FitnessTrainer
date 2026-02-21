@@ -2,8 +2,11 @@ package com.batonec.trainer.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.batonec.trainer.data.api.WorkoutApiService
 import com.batonec.trainer.data.model.ApiExercise
+import com.batonec.trainer.data.model.Exercise
+import com.batonec.trainer.data.model.ExerciseSet
+import com.batonec.trainer.data.model.Workout
+import com.batonec.trainer.data.model.WorkoutData
 import com.batonec.trainer.data.repository.WorkoutRepository
 import com.batonec.trainer.domain.workout.WorkoutHistoryAnalyzer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,6 +14,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 data class NewWorkoutSet(
@@ -29,6 +35,8 @@ data class NewWorkoutUiState(
     val exercises: List<ApiExercise> = emptyList(),
     val isLoadingExercises: Boolean = false,
     val error: String? = null,
+    val saveError: String? = null,
+    val isSavingWorkout: Boolean = false,
     val selectedExercise: ApiExercise? = null,
     val isAddingExercise: Boolean = false,
     val isAddingSet: Boolean = false,
@@ -39,8 +47,7 @@ data class NewWorkoutUiState(
 
 @HiltViewModel
 class NewWorkoutViewModel @Inject constructor(
-    private val workoutRepository: WorkoutRepository,
-    private val workoutApiService: WorkoutApiService
+    private val workoutRepository: WorkoutRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(NewWorkoutUiState())
     val uiState: StateFlow<NewWorkoutUiState> = _uiState.asStateFlow()
@@ -53,19 +60,22 @@ class NewWorkoutViewModel @Inject constructor(
     fun loadExercises() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingExercises = true, error = null)
-            try {
-                val response = workoutApiService.getExercises()
-                _uiState.value = _uiState.value.copy(
-                    exercises = response.exercises,
-                    isLoadingExercises = false,
-                    error = null
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoadingExercises = false,
-                    error = e.message ?: "Ошибка загрузки упражнений"
-                )
-            }
+            val result = workoutRepository.loadExercises()
+            result.fold(
+                onSuccess = { exercises ->
+                    _uiState.value = _uiState.value.copy(
+                        exercises = exercises,
+                        isLoadingExercises = false,
+                        error = null
+                    )
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isLoadingExercises = false,
+                        error = e.message ?: "Ошибка загрузки упражнений"
+                    )
+                }
+            )
         }
     }
 
@@ -247,14 +257,74 @@ class NewWorkoutViewModel @Inject constructor(
     }
 
     fun finishWorkout() {
-        // Сбрасываем состояние тренировки, но сохраняем загруженные упражнения
-        _uiState.value = _uiState.value.copy(
-            workoutExercises = emptyList(),
-            selectedExercise = null,
-            isAddingExercise = false,
-            isAddingSet = false,
-            currentSetReps = 12,
-            currentSetWeight = 0.0
+        val exercises = _uiState.value.workoutExercises
+        if (exercises.isEmpty()) {
+            _uiState.value = _uiState.value.copy(
+                selectedExercise = null,
+                isAddingExercise = false,
+                isAddingSet = false,
+                currentSetReps = 12,
+                currentSetWeight = 0.0
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSavingWorkout = true, saveError = null)
+
+            val workout = buildLocalWorkout(exercises)
+            val saveResult = workoutRepository.saveWorkoutLocally(workout)
+
+            saveResult.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        workoutExercises = emptyList(),
+                        selectedExercise = null,
+                        isAddingExercise = false,
+                        isAddingSet = false,
+                        currentSetReps = 12,
+                        currentSetWeight = 0.0,
+                        isSavingWorkout = false,
+                        saveError = null
+                    )
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isSavingWorkout = false,
+                        saveError = e.message ?: "Ошибка сохранения тренировки"
+                    )
+                }
+            )
+        }
+    }
+
+    private fun buildLocalWorkout(exercises: List<NewWorkoutExercise>): Workout {
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val workoutId = (System.currentTimeMillis() / 1000L).toInt()
+
+        return Workout(
+            id = workoutId,
+            workoutDate = date,
+            planId = null,
+            data = WorkoutData(
+                focus = null,
+                notes = null,
+                exercises = exercises.map { exercise ->
+                    Exercise(
+                        name = exercise.exerciseName,
+                        exerciseId = exercise.exerciseId,
+                        sets = exercise.sets.mapIndexed { index, set ->
+                            ExerciseSet(
+                                reps = set.reps,
+                                notes = set.notes,
+                                weight = set.weight,
+                                setIndex = index + 1
+                            )
+                        }
+                    )
+                },
+                loadType = null
+            )
         )
     }
 }

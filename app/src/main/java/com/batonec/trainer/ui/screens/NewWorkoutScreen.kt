@@ -51,8 +51,11 @@ fun NewWorkoutScreen(
                 },
                 actions = {
                     if (uiState.workoutExercises.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.finishWorkout() }) {
-                            Text("Закончить тренировку")
+                        TextButton(
+                            onClick = { viewModel.finishWorkout() },
+                            enabled = !uiState.isSavingWorkout
+                        ) {
+                            Text(if (uiState.isSavingWorkout) "Сохранение..." else "Закончить тренировку")
                         }
                     }
                 }
@@ -171,6 +174,16 @@ fun NewWorkoutScreen(
                         ) {
                             Text("Новое упражнение")
                         }
+                    }
+                }
+
+                if (uiState.saveError != null) {
+                    item {
+                        Text(
+                            text = uiState.saveError ?: "",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
             }
