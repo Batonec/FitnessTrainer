@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.batonec.trainer.domain.workout.groupWorkoutSetsByWeightAndReps
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -257,7 +258,7 @@ fun ExerciseCard(exercise: NewWorkoutExercise) {
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
-                val groupedSets = groupSetsByWeightAndReps(exercise.sets)
+                val groupedSets = groupWorkoutSetsByWeightAndReps(exercise.sets)
                 groupedSets.forEach { group ->
                     Text(
                         text = if (group.count > 1) {
@@ -436,51 +437,5 @@ fun SetCard(
             }
         }
     }
-}
-
-data class GroupedRepsSet(
-    val weight: Double,
-    val reps: Int,
-    val count: Int
-)
-
-private fun groupSetsByWeightAndReps(sets: List<NewWorkoutSet>): List<GroupedRepsSet> {
-    if (sets.isEmpty()) return emptyList()
-    
-    val grouped = mutableListOf<GroupedRepsSet>()
-    var currentGroup: GroupedRepsSet? = null
-    
-    sets.forEach { set ->
-        if (currentGroup == null) {
-            // Начинаем новую группу
-            currentGroup = GroupedRepsSet(
-                weight = set.weight,
-                reps = set.reps,
-                count = 1
-            )
-        } else {
-            // Проверяем, можно ли добавить к текущей группе
-            // Группируем только если вес и reps одинаковые
-            if (currentGroup.weight == set.weight && currentGroup.reps == set.reps) {
-                // Добавляем к текущей группе
-                currentGroup = currentGroup.copy(
-                    count = currentGroup.count + 1
-                )
-            } else {
-                // Сохраняем текущую группу и начинаем новую
-                grouped.add(currentGroup)
-                currentGroup = GroupedRepsSet(
-                    weight = set.weight,
-                    reps = set.reps,
-                    count = 1
-                )
-            }
-        }
-    }
-    
-    // Добавляем последнюю группу
-    currentGroup?.let { grouped.add(it) }
-    
-    return grouped
 }
 

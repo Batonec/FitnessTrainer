@@ -3,6 +3,7 @@ package com.batonec.trainer.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.batonec.trainer.data.model.Workout
+import com.batonec.trainer.data.repository.RepositoryProvider
 import com.batonec.trainer.data.repository.WorkoutRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,8 @@ data class TrainingsUiState(
 )
 
 class TrainingsViewModel : ViewModel() {
+    private val workoutRepository: WorkoutRepository = RepositoryProvider.workoutRepository
+
     private val _uiState = MutableStateFlow(TrainingsUiState())
     val uiState: StateFlow<TrainingsUiState> = _uiState.asStateFlow()
 
@@ -33,7 +36,7 @@ class TrainingsViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            val result = WorkoutRepository.loadWorkouts(limit = limit, offset = 0)
+            val result = workoutRepository.loadWorkouts(limit = limit, offset = 0)
             result.fold(
                 onSuccess = { (workouts, hasMore) ->
                     currentOffset = 0
@@ -66,7 +69,7 @@ class TrainingsViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingMore = true)
             val nextOffset = currentOffset + limit
-            val result = WorkoutRepository.loadWorkouts(limit = limit, offset = nextOffset)
+            val result = workoutRepository.loadWorkouts(limit = limit, offset = nextOffset)
             result.fold(
                 onSuccess = { (workouts, hasMore) ->
                     currentOffset = nextOffset
@@ -92,4 +95,3 @@ class TrainingsViewModel : ViewModel() {
         }
     }
 }
-

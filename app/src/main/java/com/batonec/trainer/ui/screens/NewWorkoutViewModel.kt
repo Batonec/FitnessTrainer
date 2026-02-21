@@ -4,13 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.batonec.trainer.data.api.RetrofitClient
 import com.batonec.trainer.data.model.ApiExercise
+import com.batonec.trainer.data.repository.RepositoryProvider
 import com.batonec.trainer.data.repository.WorkoutRepository
+import com.batonec.trainer.domain.workout.WorkoutHistoryAnalyzer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Locale
 
 data class NewWorkoutSet(
     val reps: Int = 12,
@@ -21,7 +21,7 @@ data class NewWorkoutSet(
 data class NewWorkoutExercise(
     val exerciseId: Int,
     val exerciseName: String,
-    val sets: MutableList<NewWorkoutSet> = mutableListOf()
+    val sets: List<NewWorkoutSet> = emptyList()
 )
 
 data class NewWorkoutUiState(
@@ -33,10 +33,12 @@ data class NewWorkoutUiState(
     val isAddingSet: Boolean = false,
     val currentSetReps: Int = 12,
     val currentSetWeight: Double = 0.0,
-    val workoutExercises: MutableList<NewWorkoutExercise> = mutableListOf()
+    val workoutExercises: List<NewWorkoutExercise> = emptyList()
 )
 
 class NewWorkoutViewModel : ViewModel() {
+    private val workoutRepository: WorkoutRepository = RepositoryProvider.workoutRepository
+
     private val _uiState = MutableStateFlow(NewWorkoutUiState())
     val uiState: StateFlow<NewWorkoutUiState> = _uiState.asStateFlow()
 
@@ -67,7 +69,7 @@ class NewWorkoutViewModel : ViewModel() {
     private fun loadWorkouts() {
         viewModelScope.launch {
             // Загружаем историю тренировок и сохраняем в кеш
-            WorkoutRepository.loadWorkouts(limit = 10, offset = 0)
+            workoutRepository.loadWorkouts(limit = 10, offset = 0)
         }
     }
 
@@ -89,7 +91,10 @@ class NewWorkoutViewModel : ViewModel() {
 
     fun startAddingSet() {
         val selected = _uiState.value.selectedExercise ?: return
-        val weightFromLastWorkout = getWeightFromLastWorkout(selected.id)
+        val weightFromLastWorkout = WorkoutHistoryAnalyzer.getWeightFromLastWorkout(
+            workouts = workoutRepository.getCachedWorkouts(),
+            exerciseId = selected.id
+        )
         _uiState.value = _uiState.value.copy(
             isAddingSet = true, 
             currentSetReps = 12,
@@ -129,35 +134,41 @@ class NewWorkoutViewModel : ViewModel() {
 
     fun applySet() {
         val selected = _uiState.value.selectedExercise ?: return
-        val currentExercises = _uiState.value.workoutExercises.toMutableList()
+        val currentExercises = _uiState.value.workoutExercises
         
         // Находим или создаем упражнение
         val exerciseIndex = currentExercises.indexOfFirst { it.exerciseId == selected.id }
         
-        if (exerciseIndex >= 0) {
+        val updatedExercises = if (exerciseIndex >= 0) {
             // Обновляем существующее упражнение
-            val existing = currentExercises[exerciseIndex]
-            val newSets = existing.sets.toMutableList()
-            newSets.add(NewWorkoutSet(
-                reps = _uiState.value.currentSetReps,
-                weight = _uiState.value.currentSetWeight
-            ))
-            currentExercises[exerciseIndex] = NewWorkoutExercise(
-                existing.exerciseId,
-                existing.exerciseName,
-                newSets
-            )
+            currentExercises.mapIndexed { index, exercise ->
+                if (index != exerciseIndex) {
+                    exercise
+                } else {
+                    exercise.copy(
+                        sets = exercise.sets + NewWorkoutSet(
+                            reps = _uiState.value.currentSetReps,
+                            weight = _uiState.value.currentSetWeight
+                        )
+                    )
+                }
+            }
         } else {
             // Создаем новое упражнение
-            val newSets = mutableListOf(NewWorkoutSet(
-                reps = _uiState.value.currentSetReps,
-                weight = _uiState.value.currentSetWeight
-            ))
-            currentExercises.add(NewWorkoutExercise(selected.id, selected.name, newSets))
+            currentExercises + NewWorkoutExercise(
+                exerciseId = selected.id,
+                exerciseName = selected.name,
+                sets = listOf(
+                    NewWorkoutSet(
+                        reps = _uiState.value.currentSetReps,
+                        weight = _uiState.value.currentSetWeight
+                    )
+                )
+            )
         }
-        
+
         _uiState.value = _uiState.value.copy(
-            workoutExercises = currentExercises,
+            workoutExercises = updatedExercises,
             isAddingSet = false,
             selectedExercise = selected
         )
@@ -185,114 +196,57 @@ class NewWorkoutViewModel : ViewModel() {
 
     fun addStandardSet() {
         val selected = _uiState.value.selectedExercise ?: return
-        val currentExercises = _uiState.value.workoutExercises.toMutableList()
+        val currentExercises = _uiState.value.workoutExercises
         
         // Получаем вес из прошлой тренировки
-        val weightFromLastWorkout = getWeightFromLastWorkout(selected.id)
+        val weightFromLastWorkout = WorkoutHistoryAnalyzer.getWeightFromLastWorkout(
+            workouts = workoutRepository.getCachedWorkouts(),
+            exerciseId = selected.id
+        )
         
         // Находим или создаем упражнение
         val exerciseIndex = currentExercises.indexOfFirst { it.exerciseId == selected.id }
-        
-        if (exerciseIndex >= 0) {
+
+        val updatedExercises = if (exerciseIndex >= 0) {
             // Обновляем существующее упражнение
-            val existing = currentExercises[exerciseIndex]
-            val newSets = existing.sets.toMutableList()
-            newSets.add(NewWorkoutSet(reps = 12, weight = weightFromLastWorkout))
-            currentExercises[exerciseIndex] = NewWorkoutExercise(
-                existing.exerciseId,
-                existing.exerciseName,
-                newSets
-            )
+            currentExercises.mapIndexed { index, exercise ->
+                if (index != exerciseIndex) {
+                    exercise
+                } else {
+                    exercise.copy(
+                        sets = exercise.sets + NewWorkoutSet(reps = 12, weight = weightFromLastWorkout)
+                    )
+                }
+            }
         } else {
             // Создаем новое упражнение
-            val newSets = mutableListOf(NewWorkoutSet(reps = 12, weight = weightFromLastWorkout))
-            currentExercises.add(NewWorkoutExercise(selected.id, selected.name, newSets))
+            currentExercises + NewWorkoutExercise(
+                exerciseId = selected.id,
+                exerciseName = selected.name,
+                sets = listOf(NewWorkoutSet(reps = 12, weight = weightFromLastWorkout))
+            )
         }
         
         _uiState.value = _uiState.value.copy(
-            workoutExercises = currentExercises,
+            workoutExercises = updatedExercises,
             selectedExercise = selected
         )
-    }
-
-    /**
-     * Получить вес из последней тренировки (с самой новой датой) для данного упражнения
-     */
-    private fun getWeightFromLastWorkout(exerciseId: Int): Double {
-        val cachedWorkouts = WorkoutRepository.getCachedWorkouts()
-        
-        // Парсим дату для сортировки
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        
-        // Сортируем тренировки по дате (от новых к старым)
-        val sortedWorkouts = cachedWorkouts.sortedByDescending { workout ->
-            try {
-                dateFormat.parse(workout.workoutDate)?.time ?: 0L
-            } catch (e: Exception) {
-                0L
-            }
-        }
-        
-        // Ищем первую тренировку (с самой новой датой), которая содержит нужное упражнение
-        for (workout in sortedWorkouts) {
-            val exercise = workout.data.exercises.find { it.exerciseId == exerciseId }
-            exercise?.let {
-                // Берем максимальный вес из всех сетов этого упражнения
-                if (it.sets.isNotEmpty()) {
-                    val maxWeight = it.sets.maxOf { set -> set.weight }
-                    // Проверяем, что вес валидный (больше 0)
-                    if (maxWeight > 0) {
-                        return maxWeight
-                    }
-                }
-            }
-        }
-        
-        return 0.0
     }
 
     /**
      * Проверить, есть ли валидные данные для упражнения в прошлых тренировках
      */
     fun hasValidWorkoutData(exerciseId: Int): Boolean {
-        val cachedWorkouts = WorkoutRepository.getCachedWorkouts()
-        
-        // Парсим дату для сортировки
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        
-        // Сортируем тренировки по дате (от новых к старым)
-        val sortedWorkouts = cachedWorkouts.sortedByDescending { workout ->
-            try {
-                dateFormat.parse(workout.workoutDate)?.time ?: 0L
-            } catch (e: Exception) {
-                0L
-            }
-        }
-        
-        // Ищем первую тренировку (с самой новой датой), которая содержит нужное упражнение
-        for (workout in sortedWorkouts) {
-            val exercise = workout.data.exercises.find { it.exerciseId == exerciseId }
-            exercise?.let {
-                // Проверяем, что есть сеты с валидными данными
-                if (it.sets.isNotEmpty()) {
-                    val hasValidData = it.sets.any { set ->
-                        // Проверяем, что вес и повторы валидные (больше 0)
-                        set.weight > 0 && set.reps > 0
-                    }
-                    if (hasValidData) {
-                        return true
-                    }
-                }
-            }
-        }
-        
-        return false
+        return WorkoutHistoryAnalyzer.hasValidWorkoutData(
+            workouts = workoutRepository.getCachedWorkouts(),
+            exerciseId = exerciseId
+        )
     }
 
     fun finishWorkout() {
         // Сбрасываем состояние тренировки, но сохраняем загруженные упражнения
         _uiState.value = _uiState.value.copy(
-            workoutExercises = mutableListOf(),
+            workoutExercises = emptyList(),
             selectedExercise = null,
             isAddingExercise = false,
             isAddingSet = false,
@@ -301,4 +255,3 @@ class NewWorkoutViewModel : ViewModel() {
         )
     }
 }
-

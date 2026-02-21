@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.batonec.trainer.domain.workout.GroupedExerciseSet
+import com.batonec.trainer.domain.workout.groupConsecutiveExerciseSets
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -243,7 +245,7 @@ fun ExerciseCard(exercise: com.batonec.trainer.data.model.Exercise) {
             )
             
             // Подходы
-            val groupedSets = groupConsecutiveSets(exercise.sets)
+            val groupedSets = groupConsecutiveExerciseSets(exercise.sets)
             groupedSets.forEach { group ->
                 SetGroupRow(group = group)
             }
@@ -253,7 +255,7 @@ fun ExerciseCard(exercise: com.batonec.trainer.data.model.Exercise) {
 }
 
 @Composable
-fun SetGroupRow(group: GroupedSet) {
+fun SetGroupRow(group: GroupedExerciseSet) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -283,64 +285,6 @@ fun SetGroupRow(group: GroupedSet) {
             )
         }
     }
-}
-
-data class GroupedSet(
-    val weight: Double,
-    val reps: Int,
-    val count: Int,
-    val firstSetIndex: Int,
-    val lastSetIndex: Int,
-    val notes: String?
-)
-
-private fun groupConsecutiveSets(sets: List<com.batonec.trainer.data.model.ExerciseSet>): List<GroupedSet> {
-    if (sets.isEmpty()) return emptyList()
-    
-    val grouped = mutableListOf<GroupedSet>()
-    var currentGroup: GroupedSet? = null
-    
-    sets.forEach { set ->
-        if (currentGroup == null) {
-            // Начинаем новую группу
-            currentGroup = GroupedSet(
-                weight = set.weight,
-                reps = set.reps,
-                count = 1,
-                firstSetIndex = set.setIndex,
-                lastSetIndex = set.setIndex,
-                notes = set.notes
-            )
-        } else {
-            // Проверяем, можно ли добавить к текущей группе
-            // Группируем только если вес, reps и заметки одинаковые
-            if (currentGroup.weight == set.weight &&
-                currentGroup.reps == set.reps &&
-                currentGroup.notes == set.notes) {
-                // Добавляем к текущей группе
-                currentGroup = currentGroup.copy(
-                    count = currentGroup.count + 1,
-                    lastSetIndex = set.setIndex
-                )
-            } else {
-                // Сохраняем текущую группу и начинаем новую
-                grouped.add(currentGroup)
-                currentGroup = GroupedSet(
-                    weight = set.weight,
-                    reps = set.reps,
-                    count = 1,
-                    firstSetIndex = set.setIndex,
-                    lastSetIndex = set.setIndex,
-                    notes = set.notes
-                )
-            }
-        }
-    }
-    
-    // Добавляем последнюю группу
-    currentGroup?.let { grouped.add(it) }
-    
-    return grouped
 }
 
 @Composable
@@ -478,4 +422,3 @@ private fun formatDateDay(dateString: String): String {
         ""
     }
 }
-

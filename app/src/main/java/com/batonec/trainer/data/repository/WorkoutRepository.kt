@@ -1,37 +1,33 @@
 package com.batonec.trainer.data.repository
 
 import com.batonec.trainer.data.api.RetrofitClient
+import com.batonec.trainer.data.api.WorkoutApiService
 import com.batonec.trainer.data.model.Workout
 
-object WorkoutRepository {
-    // Кеш истории тренировок (не персистентный)
+interface WorkoutRepository {
+    fun getCachedWorkouts(): List<Workout>
+    suspend fun loadWorkouts(limit: Int = 10, offset: Int = 0): Result<Pair<List<Workout>, Boolean>>
+}
+
+class DefaultWorkoutRepository(
+    private val apiService: WorkoutApiService = RetrofitClient.workoutApiService
+) : WorkoutRepository {
+    // Кеш истории тренировок (не персистентный, живет пока процесс приложения активен)
     private var cachedWorkouts: List<Workout> = emptyList()
-    
-    /**
-     * Получить закешированные тренировки
-     */
-    fun getCachedWorkouts(): List<Workout> = cachedWorkouts
-    
-    /**
-     * Обновить кеш тренировок
-     */
-    fun updateCache(workouts: List<Workout>) {
+
+    override fun getCachedWorkouts(): List<Workout> = cachedWorkouts
+
+    private fun updateCache(workouts: List<Workout>) {
         cachedWorkouts = workouts
     }
-    
-    /**
-     * Добавить тренировки в кеш (для пагинации)
-     */
-    fun appendToCache(workouts: List<Workout>) {
+
+    private fun appendToCache(workouts: List<Workout>) {
         cachedWorkouts = cachedWorkouts + workouts
     }
-    
-    /**
-     * Загрузить историю тренировок и обновить кеш
-     */
-    suspend fun loadWorkouts(limit: Int = 10, offset: Int = 0): Result<Pair<List<Workout>, Boolean>> {
+
+    override suspend fun loadWorkouts(limit: Int, offset: Int): Result<Pair<List<Workout>, Boolean>> {
         return try {
-            val response = RetrofitClient.workoutApiService.getWorkouts(
+            val response = apiService.getWorkouts(
                 limit = limit,
                 offset = offset
             )
@@ -48,4 +44,3 @@ object WorkoutRepository {
         }
     }
 }
-
