@@ -264,41 +264,43 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 return
 
             init_data = str(payload.get("initData", ""))
+            unsafe_telegram_user = payload.get("unsafeUser")
+            validation_result = None
             if init_data:
                 validation_result = validate_init_data(init_data, BOT_TOKEN)
                 if not validation_result.get("ok"):
-                    self._send_json(HTTPStatus.BAD_REQUEST, validation_result)
-                    return
+                    if not isinstance(unsafe_telegram_user, dict):
+                        self._send_json(HTTPStatus.BAD_REQUEST, validation_result)
+                        return
+                else:
+                    telegram_user = validation_result.get("received", {}).get("user")
+                    if not isinstance(telegram_user, dict):
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"ok": False, "reason": "Telegram user payload is missing in initData"},
+                        )
+                        return
 
-                telegram_user = validation_result.get("received", {}).get("user")
-                if not isinstance(telegram_user, dict):
+                    try:
+                        user = STORE.upsert_telegram_user(telegram_user)
+                    except ValueError as exc:
+                        self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
+                        return
+
+                    headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
                     self._send_json(
-                        HTTPStatus.BAD_REQUEST,
-                        {"ok": False, "reason": "Telegram user payload is missing in initData"},
+                        HTTPStatus.OK,
+                        {
+                            "ok": True,
+                            "user": user,
+                            "auth_mode": "telegram",
+                            "auth_is_fresh": validation_result.get("auth_is_fresh"),
+                            "auth_age_seconds": validation_result.get("auth_age_seconds"),
+                        },
+                        extra_headers=headers,
                     )
                     return
 
-                try:
-                    user = STORE.upsert_telegram_user(telegram_user)
-                except ValueError as exc:
-                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
-                    return
-
-                headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
-                self._send_json(
-                    HTTPStatus.OK,
-                    {
-                        "ok": True,
-                        "user": user,
-                        "auth_mode": "telegram",
-                        "auth_is_fresh": validation_result.get("auth_is_fresh"),
-                        "auth_age_seconds": validation_result.get("auth_age_seconds"),
-                    },
-                    extra_headers=headers,
-                )
-                return
-
-            unsafe_telegram_user = payload.get("unsafeUser")
             if isinstance(unsafe_telegram_user, dict):
                 try:
                     user = STORE.upsert_telegram_user(
@@ -316,7 +318,8 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                         "ok": True,
                         "user": user,
                         "auth_mode": "telegram_unsafe",
-                        "warning": "Mini App launched without signed initData, using Telegram user fallback.",
+                        "warning": "Mini App launched without verified initData, using Telegram user fallback.",
+                        "validation_reason": validation_result.get("reason") if validation_result else None,
                     },
                     extra_headers=headers,
                 )

@@ -63,6 +63,29 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(list_response.payload["user"]["auth_source"], "telegram_unsafe")
             self.assertEqual(list_response.payload["workouts"][0]["data"]["exercises"][0]["name"], "Pull Up")
 
+    def test_invalid_initdata_can_fall_back_to_unsafe_telegram_user(self) -> None:
+        with running_miniapp_server(allow_debug_user=False, bot_token="valid-test-token") as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {
+                    "initData": "user=%7B%22id%22%3A1%7D&auth_date=123456&hash=definitely-invalid",
+                    "unsafeUser": {
+                        "id": 555000222,
+                        "first_name": "Telegram",
+                        "last_name": "Recovered",
+                        "username": "telegram_recovered",
+                    },
+                },
+            )
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["auth_mode"], "telegram_unsafe")
+            self.assertIn("Hash mismatch", response.payload["validation_reason"])
+            self.assertEqual(response.payload["user"]["auth_source"], "telegram_unsafe")
+
     def test_workouts_endpoint_orders_same_day_entries_from_newest_to_oldest(self) -> None:
         with running_miniapp_server(allow_debug_user=True) as app:
             client = JsonHttpClient(app.base_url)
