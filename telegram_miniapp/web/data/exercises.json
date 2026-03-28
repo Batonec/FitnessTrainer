@@ -1,18 +1,16 @@
 {
   "exercises": [
-    { "id": 1, "name": "Bench Press" },
-    { "id": 2, "name": "Incline Dumbbell Press" },
-    { "id": 3, "name": "Barbell Row" },
-    { "id": 4, "name": "Pull Up" },
-    { "id": 5, "name": "Overhead Press" },
-    { "id": 6, "name": "Squat" },
-    { "id": 7, "name": "Romanian Deadlift" },
-    { "id": 8, "name": "Leg Press" },
-    { "id": 9, "name": "Lat Pulldown" },
-    { "id": 10, "name": "Seated Cable Row" },
-    { "id": 11, "name": "Dumbbell Curl" },
-    { "id": 12, "name": "Triceps Pushdown" },
-    { "id": 13, "name": "Lateral Raise" },
-    { "id": 14, "name": "Calf Raise" }
+    { "id": 8, "name": "Жим ногами" },
+    { "id": 1, "name": "Жим гор." },
+    { "id": 9, "name": "Тяга верт." },
+    { "id": 13, "name": "Дельты" },
+    { "id": 11, "name": "Бицепс" },
+    { "id": 12, "name": "Трицепс" },
+    { "id": 16, "name": "Разгибания ног" },
+    { "id": 15, "name": "Сгибания ног" },
+    { "id": 10, "name": "Тяга горизонт." },
+    { "id": 17, "name": "Бабочка" },
+    { "id": 18, "name": "Жим в тренажере" },
+    { "id": 4, "name": "Подтягивания грав." }
   ]
 }

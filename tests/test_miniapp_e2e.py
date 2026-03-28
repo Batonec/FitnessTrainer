@@ -67,23 +67,23 @@ class MiniAppE2ETest(unittest.TestCase):
     def test_can_create_two_same_day_workouts_and_latest_one_is_first(self) -> None:
         self.open_app()
 
-        self.page.locator('[data-action="select-exercise"]').filter(has_text="Squat").click()
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
         self.add_default_set()
         self.page.locator('[data-action="finish-workout"]').click()
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
-        self.page.locator('[data-action="select-exercise"]').filter(has_text="Pull Up").click()
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Тяга верт.").click()
         self.add_default_set()
         self.page.locator('[data-action="finish-workout"]').click()
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
         self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
-        expect(self.page.locator(".workout-card").first).to_contain_text("Pull Up")
+        expect(self.page.locator(".workout-card").first).to_contain_text("Тяга верт.")
 
     def test_restored_draft_can_be_reset_from_ui(self) -> None:
         self.open_app()
 
-        self.page.locator('[data-action="select-exercise"]').filter(has_text="Bench Press").click()
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.").click()
         self.add_default_set()
         self.page.reload(wait_until="networkidle")
 
@@ -95,10 +95,10 @@ class MiniAppE2ETest(unittest.TestCase):
 
         expect(self.page.locator(".draft-banner")).to_have_count(0)
         expect(
-            self.page.locator('[data-action="select-exercise"]').filter(has_text="Bench Press")
+            self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.")
         ).to_be_visible()
         expect(
-            self.page.locator('[data-action="select-exercise"]').filter(has_text="Squat")
+            self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
         ).to_be_visible()
 
 
