@@ -1,14 +1,7 @@
 name: Deploy Mini App Backend
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "telegram_miniapp/server.py"
-      - "telegram_miniapp/backend_store.py"
-      - "telegram_miniapp/deploy/trainer-miniapp-backend.service"
-      - ".github/workflows/deploy-backend.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:

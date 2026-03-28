@@ -1,12 +1,7 @@
 name: Deploy Mini App Web
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "telegram_miniapp/web/**"
-      - ".github/workflows/deploy-web.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:

@@ -175,10 +175,10 @@ Secrets добавляются в:
 
 ### Какой workflow за что отвечает
 
-- `ci.yml` — запускает unit, integration и browser e2e тесты на каждом `push` и `pull_request`
-- `deploy-web.yml` — автоматически синкает `telegram_miniapp/web/` в `/opt/trainer-miniapp/www`
-- `deploy-backend.yml` — загружает backend API, storage слой и перезапускает `trainer-miniapp-backend.service`
-- `deploy-bot.yml` — загружает `telegram_miniapp/bot.py`, обновляет systemd unit и перезапускает `trainer-miniapp-bot.service`
+- `ci.yml` — запускает unit, integration и browser e2e тесты на каждом `push` и `pull_request`; на `main` после успешного тестового job вызывает нужные деплойные workflow
+- `deploy-web.yml` — reusable/manual workflow, который синкает `telegram_miniapp/web/` в `/opt/trainer-miniapp/www`
+- `deploy-backend.yml` — reusable/manual workflow, который загружает backend API, storage слой и перезапускает `trainer-miniapp-backend.service`
+- `deploy-bot.yml` — reusable/manual workflow, который загружает `telegram_miniapp/bot.py`, обновляет systemd unit и перезапускает `trainer-miniapp-bot.service`
 
 ### Что важно
 

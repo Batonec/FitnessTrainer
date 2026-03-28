@@ -106,10 +106,10 @@ python3 -m venv .venv
 
 В репозитории настроены четыре workflow:
 
-- [ci.yml](./.github/workflows/ci.yml) — автотесты на каждый `push` и `pull_request`
-- [deploy-web.yml](./.github/workflows/deploy-web.yml) — автодеплой `telegram_miniapp/web/**` на VPS при пуше в `main`
-- [deploy-backend.yml](./.github/workflows/deploy-backend.yml) — деплой backend API и systemd unit на VPS
-- [deploy-bot.yml](./.github/workflows/deploy-bot.yml) — деплой `bot.py` и systemd unit на VPS при изменении бота
+- [ci.yml](./.github/workflows/ci.yml) — автотесты на каждый `push` и `pull_request`, а на `main` после успешных тестов вызывает нужные деплойные workflow
+- [deploy-web.yml](./.github/workflows/deploy-web.yml) — reusable/manual workflow для выкладки `telegram_miniapp/web/**` на VPS
+- [deploy-backend.yml](./.github/workflows/deploy-backend.yml) — reusable/manual workflow для backend API и systemd unit
+- [deploy-bot.yml](./.github/workflows/deploy-bot.yml) — reusable/manual workflow для `bot.py` и systemd unit
 
 Чтобы они заработали в GitHub, в secrets репозитория нужно добавить:
 

@@ -12,8 +12,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      backend: ${{ steps.filter.outputs.backend }}
+      bot: ${{ steps.filter.outputs.bot }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            changed_files="$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA")"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            changed_files="$(git diff --name-only "$BEFORE_SHA" "$HEAD_SHA")"
+          else
+            changed_files="$(git diff-tree --no-commit-id --name-only -r "$HEAD_SHA")"
+          fi
+
+          echo "Changed files:"
+          printf '%s\n' "$changed_files"
+
+          has_match() {
+            pattern="$1"
+            if printf '%s\n' "$changed_files" | grep -Eq "$pattern"; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+
+          echo "web=$(has_match '^(telegram_miniapp/web/|\\.github/workflows/deploy-web\\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "backend=$(has_match '^(telegram_miniapp/server\\.py$|telegram_miniapp/backend_store\\.py$|telegram_miniapp/deploy/trainer-miniapp-backend\\.service$|\\.github/workflows/deploy-backend\\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "bot=$(has_match '^(telegram_miniapp/bot\\.py$|telegram_miniapp/deploy/trainer-miniapp-bot\\.service$|\\.github/workflows/deploy-bot\\.yml$)')" >> "$GITHUB_OUTPUT"
+
   test:
     name: Run test suite
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -36,3 +86,30 @@ jobs:
 
       - name: Run automated tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  deploy-web:
+    name: Deploy web after tests
+    needs:
+      - changes
+      - test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.web == 'true'
+    uses: ./.github/workflows/deploy-web.yml
+    secrets: inherit
+
+  deploy-backend:
+    name: Deploy backend after tests
+    needs:
+      - changes
+      - test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.backend == 'true'
+    uses: ./.github/workflows/deploy-backend.yml
+    secrets: inherit
+
+  deploy-bot:
+    name: Deploy bot after tests
+    needs:
+      - changes
+      - test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.bot == 'true'
+    uses: ./.github/workflows/deploy-bot.yml
+    secrets: inherit

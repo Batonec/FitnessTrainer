@@ -1,13 +1,7 @@
 name: Deploy Telegram Bot
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "telegram_miniapp/bot.py"
-      - "telegram_miniapp/deploy/trainer-miniapp-bot.service"
-      - ".github/workflows/deploy-bot.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
