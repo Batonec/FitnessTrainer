@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -130,8 +131,18 @@ class MiniAppStore:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    @contextmanager
+    def _connection(self) -> sqlite3.Connection:
+        with closing(self._connect()) as connection:
+            try:
+                yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
     def _initialize_schema(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -164,7 +175,7 @@ class MiniAppStore:
 
     def ensure_debug_user(self, alias: str, first_name: str = "Browser", last_name: str = "Debug") -> dict[str, Any]:
         timestamp = utc_now()
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM users WHERE debug_alias = ?",
                 (alias,),
@@ -207,7 +218,7 @@ class MiniAppStore:
             raise ValueError("Telegram user id is missing in initData")
 
         timestamp = utc_now()
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM users WHERE telegram_user_id = ?",
                 (telegram_user_id,),
@@ -266,7 +277,7 @@ class MiniAppStore:
         return self._serialize_user(row)
 
     def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM users WHERE id = ?",
                 (user_id,),
@@ -274,7 +285,7 @@ class MiniAppStore:
         return self._serialize_user(row) if row is not None else None
 
     def list_workouts(self, user_id: int) -> list[dict[str, Any]]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT id, user_id, client_id, workout_date, payload_json, created_at, updated_at
@@ -290,7 +301,7 @@ class MiniAppStore:
         normalized_payload, client_id = normalize_workout_payload(payload)
         timestamp = utc_now()
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             existing = connection.execute(
                 """
                 SELECT id, user_id, client_id, workout_date, payload_json, created_at, updated_at

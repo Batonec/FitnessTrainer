@@ -6,6 +6,8 @@
 - Telegram открывает полноценный локальный web-интерфейс Trainer
 - приложение работает на JSON-фикстурах и backend API на SQLite
 - в обычном локальном браузере без Telegram доступен `default browser user` для отладки
+- если Telegram не прислал signed `initData`, доступен `telegram_unsafe` fallback
+- черновик новой тренировки восстанавливается после перезагрузки страницы
 - старая auth/debug-заглушка сохранена отдельно
 - сервер по-прежнему умеет валидировать `Telegram.WebApp.initData`
 
@@ -15,6 +17,7 @@
 - `telegram_miniapp/backend_store.py` — SQLite storage для пользователей и тренировок
 - `telegram_miniapp/bot.py` — простой Telegram-бот на long polling
 - `telegram_miniapp/web/` — web-приложение и локальные фикстуры
+- `tests/` — unit, integration и browser e2e тесты
 
 ## Что нужно
 
@@ -40,6 +43,7 @@ BOT_TOKEN=123456:ABCDEF python3 telegram_miniapp/server.py
 - backend API поднимается вместе с `server.py`
 - тренировки сохраняются в SQLite
 - обычный браузер без Telegram автоматически получает `default browser user`
+- черновик незавершенной тренировки хранится в `localStorage`
 
 По этому адресу теперь открывается основной web-интерфейс Trainer.
 Старая debug-страница доступна отдельно:
@@ -145,8 +149,9 @@ TRAINER_VPS_HOST=root@1.2.3.4 ./telegram_miniapp/deploy/deploy.sh web
 
 ## GitHub Actions автодеплой
 
-В репозитории есть три workflow:
+В репозитории есть четыре workflow:
 
+- `.github/workflows/ci.yml`
 - `.github/workflows/deploy-web.yml`
 - `.github/workflows/deploy-backend.yml`
 - `.github/workflows/deploy-bot.yml`
@@ -170,6 +175,7 @@ Secrets добавляются в:
 
 ### Какой workflow за что отвечает
 
+- `ci.yml` — запускает unit, integration и browser e2e тесты на каждом `push` и `pull_request`
 - `deploy-web.yml` — автоматически синкает `telegram_miniapp/web/` в `/opt/trainer-miniapp/www`
 - `deploy-backend.yml` — загружает backend API, storage слой и перезапускает `trainer-miniapp-backend.service`
 - `deploy-bot.yml` — загружает `telegram_miniapp/bot.py`, обновляет systemd unit и перезапускает `trainer-miniapp-bot.service`
@@ -190,6 +196,7 @@ Secrets добавляются в:
 - экран `Progress`
 - экран `Новая тренировка`
 - работу на JSON-фикстурах, SQLite backend и `localStorage` только для UI-состояния
+- восстановление черновика и кнопку `Начать заново`
 
 Если нужен именно Telegram auth/debug flow, открой `/stub.html`.
 
@@ -220,3 +227,22 @@ Secrets добавляются в:
 1. окончательно отказаться от старого local-only fallback для тренировок
 2. расширить backend API на редактирование и удаление тренировок
 3. добавить серверные тесты и миграции данных
+
+## Локальный запуск тестов
+
+Быстрый прогон:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Полный прогон вместе с browser e2e:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
+```

@@ -259,6 +259,32 @@ button {
   font-size: 13px;
 }
 
+.draft-banner {
+  padding: 16px 18px;
+  border: 1px solid rgba(69, 98, 208, 0.14);
+  background:
+    linear-gradient(135deg, rgba(69, 98, 208, 0.08), rgba(255, 255, 255, 0.96)),
+    var(--card);
+}
+
+.draft-banner-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.draft-banner-text {
+  margin-top: 6px;
+  color: var(--page-muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.draft-banner-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
 .section-title {
   font-size: 18px;
   font-weight: 700;

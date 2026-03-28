@@ -235,6 +235,11 @@ function handleClick(event) {
     case "refresh-progress":
       refreshLocalData();
       break;
+    case "reset-workout-draft":
+      resetDraftState();
+      showFlash("Черновик тренировки очищен");
+      render();
+      break;
     case "start-adding-exercise":
       state.isAddingExercise = true;
       render();
@@ -383,6 +388,19 @@ function ensureNewWorkoutFlow() {
   if (state.workoutExercises.length === 0 && !state.selectedExerciseId) {
     state.isAddingExercise = true;
   }
+}
+
+function hasWorkoutDraft() {
+  return state.workoutExercises.length > 0 || state.selectedExerciseId !== null;
+}
+
+function countDraftExercises() {
+  const selectedExercise = getSelectedExercise();
+  const selectedExistsInDraft =
+    selectedExercise &&
+    state.workoutExercises.some((exercise) => exercise.exerciseId === selectedExercise.id);
+
+  return state.workoutExercises.length + (selectedExercise && !selectedExistsInDraft ? 1 : 0);
 }
 
 function getAllWorkouts() {
@@ -1117,11 +1135,18 @@ function renderNewWorkoutScreen() {
   const currentExercise = getCurrentWorkoutExercise();
   const availableExercises = getAvailableExercises();
   const allWorkouts = getAllWorkouts();
+  const draftExercisesCount = countDraftExercises();
   const canUseStandard =
     selectedExercise && hasValidWorkoutData(allWorkouts, selectedExercise.id);
 
   return `
     <section class="stack">
+      ${
+        hasWorkoutDraft()
+          ? renderDraftResumeCard(draftExercisesCount, state.exercises.length)
+          : ""
+      }
+
       ${state.workoutExercises.map((exercise) => renderDraftExerciseCard(exercise)).join("")}
 
       ${
@@ -1179,6 +1204,22 @@ function renderNewWorkoutScreen() {
   `;
 }
 
+function renderDraftResumeCard(draftExercisesCount, totalExercisesCount) {
+  const remainingExercisesCount = Math.max(0, totalExercisesCount - draftExercisesCount);
+  return `
+    <section class="card draft-banner">
+      <div class="draft-banner-title">Восстановлен черновик тренировки</div>
+      <div class="draft-banner-text">
+        Уже добавлено ${draftExercisesCount} из ${totalExercisesCount} упражнений.
+        Доступно для выбора ещё ${remainingExercisesCount}.
+      </div>
+      <div class="draft-banner-actions">
+        <button class="secondary-button" data-action="reset-workout-draft">Начать заново</button>
+      </div>
+    </section>
+  `;
+}
+
 function renderDraftExerciseCard(exercise) {
   const groupedSets = groupWorkoutSetsByWeightAndReps(exercise.sets);
   return `
@@ -1223,6 +1264,11 @@ function renderExercisePicker(exercises) {
     <section class="card exercise-picker">
       <div class="exercise-picker-title">Выберите упражнение</div>
       ${
+        state.workoutExercises.length
+          ? `<p class="muted-note">В этом черновике уже есть ${state.workoutExercises.length} упражнений, поэтому список ниже показывает только оставшиеся.</p>`
+          : ""
+      }
+      ${
         exercises.length
           ? exercises
               .map(
@@ -1243,6 +1289,7 @@ function renderExercisePicker(exercises) {
         state.workoutExercises.length || state.selectedExerciseId
           ? `
             <div class="picker-footer">
+              <button class="text-button" data-action="reset-workout-draft">Начать заново</button>
               <button class="text-button" data-action="cancel-adding-exercise">Отмена</button>
             </div>
           `

@@ -21,10 +21,13 @@
 - экран `New` для создания новой тренировки;
 - backend на SQLite для сохраненных тренировок;
 - browser debug user для локальной отладки без Telegram;
+- Telegram fallback user, если Mini App открылся без signed `initData`;
 - работа на JSON-фикстурах + backend-хранилище;
+- восстановление черновика незавершенной тренировки;
 - локальный dev-режим с автообновлением;
 - деплой web-части, backend и бота на VPS.
 - GitHub Actions автодеплой на VPS по SSH.
+- автотесты на push и pull request.
 
 ## Бизнес-логика в двух словах
 
@@ -33,8 +36,10 @@
 - справочник упражнений и стартовая история тренировок загружаются из JSON-файлов;
 - пользовательские тренировки сохраняются в backend на SQLite;
 - в локальной разработке браузер без Telegram автоматически работает как `default browser user`;
+- при проблемах с signed `initData` приложение может зайти через `telegram_unsafe` fallback;
 - все экраны работают на объединенном наборе `фикстуры + серверные тренировки`;
-- новая тренировка сразу начинает участвовать в истории, прогрессе и логике подбора стандартного веса.
+- новая тренировка сразу начинает участвовать в истории, прогрессе и логике подбора стандартного веса;
+- незавершенная тренировка восстанавливается как черновик и может быть сброшена кнопкой `Начать заново`.
 
 Подробная спецификация находится здесь:
 
@@ -47,6 +52,8 @@
 - `telegram_miniapp/server.py` — backend API и локальный сервер для разработки;
 - `telegram_miniapp/backend_store.py` — SQLite storage и user/workout persistence;
 - `telegram_miniapp/dev_server.py` — dev launcher с autoreload;
+- `tests/` — unit, integration и browser e2e тесты;
+- `requirements-dev.txt` — зависимости для browser e2e и CI;
 - `telegram_miniapp/deploy/` — файлы для деплоя на VPS;
 - `BUSINESS_LOGIC.md` — подробное описание бизнес-правил приложения.
 
@@ -76,10 +83,30 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 
 - [telegram_miniapp/README.md](./telegram_miniapp/README.md)
 
+## Тесты
+
+Быстрый локальный прогон без браузерных зависимостей:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Полный прогон с браузерным e2e:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
+```
+
 ## GitHub Actions
 
-В репозитории настроены три workflow:
+В репозитории настроены четыре workflow:
 
+- [ci.yml](./.github/workflows/ci.yml) — автотесты на каждый `push` и `pull_request`
 - [deploy-web.yml](./.github/workflows/deploy-web.yml) — автодеплой `telegram_miniapp/web/**` на VPS при пуше в `main`
 - [deploy-backend.yml](./.github/workflows/deploy-backend.yml) — деплой backend API и systemd unit на VPS
 - [deploy-bot.yml](./.github/workflows/deploy-bot.yml) — деплой `bot.py` и systemd unit на VPS при изменении бота
