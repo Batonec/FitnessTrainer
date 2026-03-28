@@ -156,6 +156,11 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator(".progress-summary-grid")).to_contain_text("+30 кг / +4 повт.")
         expect(self.page.locator(".progress-chart")).to_be_visible()
 
+    def test_topbar_shows_current_user_id_badge(self) -> None:
+        self.open_app()
+
+        expect(self.page.locator(".topbar-meta")).to_contain_text("UID 1")
+
 
 if __name__ == "__main__":
     unittest.main()

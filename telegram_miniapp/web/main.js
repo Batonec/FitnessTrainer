@@ -1650,6 +1650,10 @@ function buildTopbarPills() {
     pills.push('<span class="pill pill-build">Telegram fallback</span>');
   }
 
+  if (Number.isFinite(state.currentUser?.id)) {
+    pills.push(`<span class="pill pill-user-id">UID ${escapeHtml(String(state.currentUser.id))}</span>`);
+  }
+
   return pills.join("");
 }
 

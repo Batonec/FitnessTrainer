@@ -827,6 +827,11 @@ button {
   color: var(--success-ink);
 }
 
+.pill-user-id {
+  background: rgba(17, 17, 17, 0.08);
+  color: var(--page-ink);
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
