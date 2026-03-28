@@ -57,9 +57,9 @@ jobs:
             fi
           }
 
-          echo "web=$(has_match '^(telegram_miniapp/web/|\\.github/workflows/deploy-web\\.yml$)')" >> "$GITHUB_OUTPUT"
-          echo "backend=$(has_match '^(telegram_miniapp/server\\.py$|telegram_miniapp/backend_store\\.py$|telegram_miniapp/deploy/trainer-miniapp-backend\\.service$|\\.github/workflows/deploy-backend\\.yml$)')" >> "$GITHUB_OUTPUT"
-          echo "bot=$(has_match '^(telegram_miniapp/bot\\.py$|telegram_miniapp/deploy/trainer-miniapp-bot\\.service$|\\.github/workflows/deploy-bot\\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "web=$(has_match '^(telegram_miniapp/web/|\.github/workflows/deploy-web\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "backend=$(has_match '^(telegram_miniapp/server\.py$|telegram_miniapp/backend_store\.py$|telegram_miniapp/deploy/trainer-miniapp-backend\.service$|\.github/workflows/deploy-backend\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "bot=$(has_match '^(telegram_miniapp/bot\.py$|telegram_miniapp/deploy/trainer-miniapp-bot\.service$|\.github/workflows/deploy-bot\.yml$)')" >> "$GITHUB_OUTPUT"
 
   test:
     name: Run test suite
