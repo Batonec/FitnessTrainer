@@ -344,6 +344,8 @@ class MiniAppStore:
             "id": row["id"],
             "workout_date": payload["workout_date"],
             "plan_id": payload.get("plan_id"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
             "data": payload["data"],
         }
 

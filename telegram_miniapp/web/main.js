@@ -392,7 +392,24 @@ function getAllWorkouts() {
 function sortWorkouts(workouts) {
   return [...workouts].sort((left, right) => {
     if (left.workout_date === right.workout_date) {
-      return (right.id || 0) - (left.id || 0);
+      const createdAtDiff = (Number(right.created_at) || 0) - (Number(left.created_at) || 0);
+      if (createdAtDiff !== 0) {
+        return createdAtDiff;
+      }
+
+      const updatedAtDiff = (Number(right.updated_at) || 0) - (Number(left.updated_at) || 0);
+      if (updatedAtDiff !== 0) {
+        return updatedAtDiff;
+      }
+
+      const fixtureBiasDiff =
+        (Number(Boolean(right.created_at || right.updated_at)) || 0) -
+        (Number(Boolean(left.created_at || left.updated_at)) || 0);
+      if (fixtureBiasDiff !== 0) {
+        return fixtureBiasDiff;
+      }
+
+      return (Number(right.id) || 0) - (Number(left.id) || 0);
     }
     return right.workout_date.localeCompare(left.workout_date);
   });
