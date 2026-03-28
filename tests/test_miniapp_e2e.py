@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from support import WEB_DIR, running_miniapp_server
+from support import JsonHttpClient, WEB_DIR, running_miniapp_server, sample_workout_payload
 
 try:
     from playwright.sync_api import expect, sync_playwright
@@ -64,6 +64,46 @@ class MiniAppE2ETest(unittest.TestCase):
         self.page.locator('[data-action="start-adding-set"]').click()
         self.page.locator('[data-action="set-apply"]').click()
 
+    def seed_progress_workouts(self) -> None:
+        client = JsonHttpClient(self.app.base_url)
+        client.request_json("POST", "/api/session/resolve", {})
+        client.request_json(
+            "POST",
+            "/api/workouts",
+            sample_workout_payload(
+                client_id="progress-legext-1",
+                workout_date="2026-03-10",
+                exercise_id=16,
+                exercise_name="Разгибания ног",
+                weight=120.0,
+                reps=10,
+            ),
+        )
+        client.request_json(
+            "POST",
+            "/api/workouts",
+            sample_workout_payload(
+                client_id="progress-legext-2",
+                workout_date="2026-03-18",
+                exercise_id=16,
+                exercise_name="Разгибания ног",
+                weight=140.0,
+                reps=12,
+            ),
+        )
+        client.request_json(
+            "POST",
+            "/api/workouts",
+            sample_workout_payload(
+                client_id="progress-legext-3",
+                workout_date="2026-03-26",
+                exercise_id=16,
+                exercise_name="Разгибания ног",
+                weight=150.0,
+                reps=14,
+            ),
+        )
+
     def test_can_create_two_same_day_workouts_and_latest_one_is_first(self) -> None:
         self.open_app()
 
@@ -100,6 +140,21 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(
             self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
         ).to_be_visible()
+
+    def test_progress_screen_shows_weight_and_rep_growth_for_selected_exercise(self) -> None:
+        self.seed_progress_workouts()
+        self.open_app()
+
+        self.page.locator('[data-action="switch-tab"][data-tab="progress"]').click()
+        self.page.locator("#progress-exercise").select_option("16")
+
+        expect(self.page.locator(".topbar-title")).to_have_text("Progress")
+        expect(self.page.locator(".metric-card")).to_contain_text("Тренировок за период")
+        expect(self.page.locator("#progress-exercise")).to_have_value("16")
+        expect(self.page.locator(".progress-panel")).to_contain_text("Разгибания ног")
+        expect(self.page.locator(".progress-summary-grid")).to_contain_text("Изменение")
+        expect(self.page.locator(".progress-summary-grid")).to_contain_text("+30 кг / +4 повт.")
+        expect(self.page.locator(".progress-chart")).to_be_visible()
 
 
 if __name__ == "__main__":

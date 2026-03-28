@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   draft: "trainer-miniapp-draft-v1",
   tab: "trainer-miniapp-tab-v1",
   range: "trainer-miniapp-range-v1",
+  progressExercise: "trainer-miniapp-progress-exercise-v1",
 };
 
 const PROGRESS_RANGES = [
@@ -21,6 +22,7 @@ const state = {
   loadError: null,
   currentTab: readTextStorage(STORAGE_KEYS.tab, "new"),
   selectedRange: readTextStorage(STORAGE_KEYS.range, "DAYS_30"),
+  selectedProgressExerciseId: readNumberStorage(STORAGE_KEYS.progressExercise, null),
   currentUser: null,
   exercises: [],
   customWorkouts: sortWorkouts(readJsonStorage(STORAGE_KEYS.customWorkouts, [])),
@@ -38,6 +40,7 @@ let flashTimeoutId = null;
 let devVersion = null;
 
 root.addEventListener("click", handleClick);
+root.addEventListener("change", handleChange);
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.isAddingSet) {
     cancelAddingSet();
@@ -65,6 +68,7 @@ async function bootstrap() {
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
     state.currentUser = workoutsResponse.user || state.currentUser;
+    ensureSelectedProgressExercise();
     ensureDraftExerciseStillExists();
     ensureNewWorkoutFlow();
     state.booting = false;
@@ -286,6 +290,22 @@ function handleClick(event) {
   }
 }
 
+function handleChange(event) {
+  const actionTarget = event.target.closest("[data-action]");
+  if (!actionTarget) {
+    return;
+  }
+
+  const { action } = actionTarget.dataset;
+  switch (action) {
+    case "select-progress-exercise":
+      setSelectedProgressExercise(Number(actionTarget.value));
+      break;
+    default:
+      break;
+  }
+}
+
 function setCurrentTab(tab) {
   if (!tab || state.currentTab === tab) {
     return;
@@ -326,6 +346,7 @@ async function refreshLocalData() {
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
     state.currentUser = workoutsResponse.user || state.currentUser;
+    ensureSelectedProgressExercise();
     state.booting = false;
     state.loadError = null;
     ensureDraftExerciseStillExists();
@@ -432,10 +453,63 @@ function getAvailableExercises() {
   return state.exercises.filter((exercise) => !addedIds.has(exercise.id));
 }
 
+function getProgressExercises(workouts = getAllWorkouts()) {
+  const lookup = new Map();
+
+  state.exercises.forEach((exercise) => {
+    lookup.set(exercise.id, {
+      id: exercise.id,
+      name: exercise.name,
+    });
+  });
+
+  sortWorkouts(workouts).forEach((workout) => {
+    workout.data.exercises.forEach((exercise) => {
+      if (!lookup.has(exercise.exercise_id)) {
+        lookup.set(exercise.exercise_id, {
+          id: exercise.exercise_id,
+          name: exercise.name,
+        });
+      }
+    });
+  });
+
+  return Array.from(lookup.values());
+}
+
+function ensureSelectedProgressExercise() {
+  const progressExercises = getProgressExercises();
+  if (!progressExercises.length) {
+    state.selectedProgressExerciseId = null;
+    localStorage.removeItem(STORAGE_KEYS.progressExercise);
+    return;
+  }
+
+  const stillExists = progressExercises.some(
+    (exercise) => exercise.id === state.selectedProgressExerciseId
+  );
+  if (stillExists) {
+    return;
+  }
+
+  state.selectedProgressExerciseId = progressExercises[0].id;
+  writeTextStorage(STORAGE_KEYS.progressExercise, String(progressExercises[0].id));
+}
+
 function selectExercise(exerciseId) {
   state.selectedExerciseId = exerciseId;
   state.isAddingExercise = false;
   persistDraft();
+  render();
+}
+
+function setSelectedProgressExercise(exerciseId) {
+  if (!Number.isFinite(exerciseId) || exerciseId <= 0) {
+    return;
+  }
+
+  state.selectedProgressExerciseId = exerciseId;
+  writeTextStorage(STORAGE_KEYS.progressExercise, String(exerciseId));
   render();
 }
 
@@ -542,6 +616,7 @@ async function finishWorkout() {
       payload.workout,
       ...state.customWorkouts.filter((workout) => workout.id !== payload.workout.id),
     ]);
+    ensureSelectedProgressExercise();
     resetDraftState();
     showFlash(
       state.currentUser?.is_default_debug_user
@@ -709,10 +784,24 @@ function groupWorkoutSetsByWeightAndReps(sets) {
 }
 
 function summarizeProgress(workouts, rangeKey) {
+  const filtered = getWorkoutsInRange(workouts, rangeKey);
+
+  if (!filtered.length) {
+    return {
+      totalWorkouts: 0,
+    };
+  }
+
+  return {
+    totalWorkouts: filtered.length,
+  };
+}
+
+function getWorkoutsInRange(workouts, rangeKey) {
   const range = PROGRESS_RANGES.find((item) => item.key === rangeKey) || PROGRESS_RANGES[1];
   const today = parseIsoDate(getLocalTodayIso());
 
-  const filtered = workouts
+  return workouts
     .map((workout) => {
       const date = parseIsoDate(workout.workout_date);
       return { workout, date };
@@ -720,87 +809,87 @@ function summarizeProgress(workouts, rangeKey) {
     .filter(({ date }) => inRange(date, range.days, today))
     .sort((left, right) => right.date - left.date)
     .map(({ workout }) => workout);
+}
 
-  if (!filtered.length) {
-    return {
-      totalWorkouts: 0,
-      totalVolume: 0,
-      averageVolumePerWorkout: 0,
-      topExerciseByVolume: null,
-      heaviestSet: null,
-      volumeTrend: [],
-    };
-  }
+function buildExerciseProgressSeries(workouts, rangeKey, exerciseId) {
+  return getWorkoutsInRange(workouts, rangeKey)
+    .map((workout) => {
+      const exercise = workout.data.exercises.find((item) => item.exercise_id === exerciseId);
+      if (!exercise) {
+        return null;
+      }
 
-  const exerciseVolumes = new Map();
-  let heaviestSet = null;
+      const heaviestSet = pickHeaviestSet(exercise.sets);
+      const highestRepSet = pickHighestRepSet(exercise.sets);
+      if (!heaviestSet || !highestRepSet) {
+        return null;
+      }
 
-  filtered.forEach((workout) => {
-    workout.data.exercises.forEach((exercise) => {
-      exercise.sets.forEach((set) => {
-        if (set.weight > 0 && set.reps > 0) {
-          const currentVolume = exerciseVolumes.get(exercise.name) || 0;
-          exerciseVolumes.set(exercise.name, currentVolume + set.weight * set.reps);
-        }
-
-        if (
-          !heaviestSet ||
-          set.weight > heaviestSet.weight ||
-          (set.weight === heaviestSet.weight && set.reps > heaviestSet.reps)
-        ) {
-          heaviestSet = {
-            exerciseName: exercise.name,
-            weight: set.weight,
-            reps: set.reps,
-            workoutDate: workout.workout_date,
-          };
-        }
-      });
-    });
-  });
-
-  const volumeTrend = filtered
-    .slice(0, 7)
-    .reverse()
-    .map((workout) => ({
-      workoutDate: workout.workout_date,
-      volume: computeWorkoutVolume(workout),
-    }));
-
-  const totalVolume = Array.from(exerciseVolumes.values()).reduce(
-    (accumulator, value) => accumulator + value,
-    0
-  );
-
-  let topExerciseByVolume = null;
-  for (const [name, volume] of exerciseVolumes.entries()) {
-    if (!topExerciseByVolume || volume > topExerciseByVolume.totalVolume) {
-      topExerciseByVolume = {
-        exerciseName: name,
-        totalVolume: volume,
+      return {
+        workoutId: workout.id,
+        workoutDate: workout.workout_date,
+        bestWeight: Number(heaviestSet.weight) || 0,
+        repsAtBestWeight: Number(heaviestSet.reps) || 0,
+        bestReps: Number(highestRepSet.reps) || 0,
+        weightAtBestReps: Number(highestRepSet.weight) || 0,
       };
+    })
+    .filter(Boolean)
+    .reverse();
+}
+
+function pickHeaviestSet(sets) {
+  let bestSet = null;
+
+  for (const set of sets) {
+    if (
+      !bestSet ||
+      set.weight > bestSet.weight ||
+      (set.weight === bestSet.weight && set.reps > bestSet.reps) ||
+      (set.weight === bestSet.weight &&
+        set.reps === bestSet.reps &&
+        (set.set_index || 0) > (bestSet.set_index || 0))
+    ) {
+      bestSet = set;
     }
   }
 
-  return {
-    totalWorkouts: filtered.length,
-    totalVolume,
-    averageVolumePerWorkout: totalVolume / filtered.length,
-    topExerciseByVolume,
-    heaviestSet,
-    volumeTrend,
-  };
+  return bestSet;
 }
 
-function computeWorkoutVolume(workout) {
-  return workout.data.exercises.reduce((exerciseTotal, exercise) => {
-    return (
-      exerciseTotal +
-      exercise.sets.reduce((setTotal, set) => {
-        return setTotal + (set.weight > 0 && set.reps > 0 ? set.weight * set.reps : 0);
-      }, 0)
-    );
-  }, 0);
+function pickHighestRepSet(sets) {
+  let bestSet = null;
+
+  for (const set of sets) {
+    if (
+      !bestSet ||
+      set.reps > bestSet.reps ||
+      (set.reps === bestSet.reps && set.weight > bestSet.weight) ||
+      (set.reps === bestSet.reps &&
+        set.weight === bestSet.weight &&
+        (set.set_index || 0) > (bestSet.set_index || 0))
+    ) {
+      bestSet = set;
+    }
+  }
+
+  return bestSet;
+}
+
+function summarizeExerciseSeries(series) {
+  if (!series.length) {
+    return null;
+  }
+
+  const firstPoint = series[0];
+  const latestPoint = series[series.length - 1];
+
+  return {
+    firstPoint,
+    latestPoint,
+    weightDelta: latestPoint.bestWeight - firstPoint.bestWeight,
+    repsDelta: latestPoint.bestReps - firstPoint.bestReps,
+  };
 }
 
 function inRange(date, rangeDays, today) {
@@ -908,7 +997,7 @@ function renderTopbar() {
 
   const subtitles = {
     trainings: "История тренировок из серверного хранилища",
-    progress: "Сводка по объему, лучшим упражнениям и сохраненным тренировкам",
+    progress: "Рост веса и повторений по выбранному упражнению",
     new: state.currentUser?.is_default_debug_user
       ? "Сохраним тренировку на backend под default browser user"
       : "Сохраним тренировку на backend для текущего пользователя",
@@ -921,8 +1010,8 @@ function renderTopbar() {
     actionMarkup = `
       <div class="topbar-meta">
         ${buildPills}
-        <button class="icon-button" data-action="refresh-progress" aria-label="Refresh">
-          ${iconMarkup("refresh")}
+        <button class="secondary-button topbar-refresh-button" data-action="refresh-progress">
+          Обновить
         </button>
       </div>
     `;
@@ -1026,8 +1115,15 @@ function renderLoggedExerciseCard(exercise) {
 }
 
 function renderProgressScreen() {
-  const summary = summarizeProgress(getAllWorkouts(), state.selectedRange);
-  const maxVolume = Math.max(0, ...summary.volumeTrend.map((point) => point.volume));
+  const workouts = getAllWorkouts();
+  const summary = summarizeProgress(workouts, state.selectedRange);
+  const progressExercises = getProgressExercises(workouts);
+  const selectedExercise =
+    progressExercises.find((exercise) => exercise.id === state.selectedProgressExerciseId) || null;
+  const progressSeries = selectedExercise
+    ? buildExerciseProgressSeries(workouts, state.selectedRange, selectedExercise.id)
+    : [];
+  const exerciseSummary = summarizeExerciseSeries(progressSeries);
 
   return `
     <section class="stack">
@@ -1045,46 +1141,30 @@ function renderProgressScreen() {
         ).join("")}
       </div>
 
-      <div class="grid-2">
-        ${renderMetricCard("Workouts", String(summary.totalWorkouts))}
-        ${renderMetricCard("Volume", formatVolume(summary.totalVolume))}
-      </div>
-
-      ${renderMetricCard("Average Volume / Workout", formatVolume(summary.averageVolumePerWorkout))}
+      ${renderMetricCard(
+        "Тренировок за период",
+        String(summary.totalWorkouts),
+        getRangeDescription(state.selectedRange)
+      )}
 
       ${
-        summary.topExerciseByVolume
-          ? renderMetricCard(
-              "Top Exercise",
-              `${summary.topExerciseByVolume.exerciseName} (${formatVolume(
-                summary.topExerciseByVolume.totalVolume
-              )})`
-            )
-          : ""
+        progressExercises.length
+          ? renderProgressExercisePicker(progressExercises, selectedExercise, progressSeries.length)
+          : `
+            <section class="card metric-card">
+              <div class="metric-label">Прогресс по упражнениям</div>
+              <div class="metric-subtitle">
+                Когда появятся сохранённые тренировки, здесь можно будет выбрать упражнение и посмотреть его рост по времени.
+              </div>
+            </section>
+          `
       }
 
       ${
-        summary.heaviestSet
-          ? renderMetricCard(
-              "Heaviest Set",
-              `${summary.heaviestSet.exerciseName}: ${formatWeight(
-                summary.heaviestSet.weight
-              )} kg x ${summary.heaviestSet.reps}`,
-              formatShortDate(summary.heaviestSet.workoutDate)
-            )
+        selectedExercise
+          ? renderExerciseProgressCard(selectedExercise, progressSeries, exerciseSummary)
           : ""
       }
-
-      <section class="stack">
-        <div class="section-title">Recent Volume Trend</div>
-        ${
-          summary.volumeTrend.length
-            ? summary.volumeTrend
-                .map((point) => renderTrendRow(point, maxVolume))
-                .join("")
-            : `<p class="muted-note">No workouts in this range</p>`
-        }
-      </section>
     </section>
   `;
 }
@@ -1099,19 +1179,211 @@ function renderMetricCard(title, value, subtitle = "") {
   `;
 }
 
-function renderTrendRow(point, maxVolume) {
-  const progress = maxVolume > 0 ? Math.max(0.04, point.volume / maxVolume) : 0;
+function renderProgressExercisePicker(progressExercises, selectedExercise, pointsCount) {
   return `
-    <div class="trend-row">
-      <div class="trend-head">
-        <span>${escapeHtml(formatShortDate(point.workoutDate))}</span>
-        <span class="trend-value">${escapeHtml(formatVolume(point.volume))}</span>
+    <section class="card progress-filter-card">
+      <label class="field-label" for="progress-exercise">Упражнение</label>
+      <div class="select-wrap">
+        <select
+          id="progress-exercise"
+          class="select-input"
+          data-action="select-progress-exercise"
+        >
+          ${progressExercises
+            .map(
+              (exercise) => `
+                <option value="${exercise.id}" ${exercise.id === selectedExercise?.id ? "selected" : ""}>
+                  ${escapeHtml(exercise.name)}
+                </option>
+              `
+            )
+            .join("")}
+        </select>
       </div>
-      <div class="trend-bar">
-        <div class="trend-bar-fill" style="width:${progress * 100}%"></div>
+      <div class="metric-subtitle">
+        ${
+          selectedExercise
+            ? pointsCount
+              ? `В выбранном диапазоне найдено ${pointsCount} тренировок с упражнением «${escapeHtml(selectedExercise.name)}».`
+              : `Для упражнения «${escapeHtml(selectedExercise.name)}» в этом диапазоне пока нет тренировок.`
+            : "Выбери упражнение, и покажу как по нему менялись вес и повторения."
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderExerciseProgressCard(exercise, series, summary) {
+  if (!series.length || !summary) {
+    return `
+      <section class="card progress-panel">
+        <div class="section-title">${escapeHtml(exercise.name)}</div>
+        <p class="muted-note">
+          В этом диапазоне нет тренировок с этим упражнением. Переключи 7D / 30D / All или выбери другое упражнение.
+        </p>
+      </section>
+    `;
+  }
+
+  const weightValues = series.map((point) => point.bestWeight);
+  const repValues = series.map((point) => point.bestReps);
+
+  return `
+    <section class="card progress-panel">
+      <div class="progress-panel-head">
+        <div>
+          <div class="section-title">${escapeHtml(exercise.name)}</div>
+          <div class="metric-subtitle">На графике: самый тяжёлый сет и сет с максимумом повторений на каждой тренировке.</div>
+        </div>
+        <div class="progress-legend">
+          <span class="legend-item">
+            <span class="legend-swatch legend-swatch-weight"></span>
+            Вес
+          </span>
+          <span class="legend-item">
+            <span class="legend-swatch legend-swatch-reps"></span>
+            Повторы
+          </span>
+        </div>
+      </div>
+
+      <div class="progress-summary-grid">
+        ${renderProgressSnapshotCard(
+          "Старт",
+          `${formatWeight(summary.firstPoint.bestWeight)} кг`,
+          `${summary.firstPoint.bestReps} повт. • ${formatShortDate(summary.firstPoint.workoutDate)}`
+        )}
+        ${renderProgressSnapshotCard(
+          "Сейчас",
+          `${formatWeight(summary.latestPoint.bestWeight)} кг`,
+          `${summary.latestPoint.bestReps} повт. • ${formatShortDate(summary.latestPoint.workoutDate)}`
+        )}
+        ${renderProgressSnapshotCard(
+          "Изменение",
+          `${formatSignedWeight(summary.weightDelta)} / ${formatSignedCount(summary.repsDelta)}`,
+          "с начала выбранного периода"
+        )}
+      </div>
+
+      <div class="progress-scale-row">
+        <span class="scale-pill scale-pill-weight">
+          Вес: ${formatWeight(Math.min(...weightValues))}-${formatWeight(Math.max(...weightValues))} кг
+        </span>
+        <span class="scale-pill scale-pill-reps">
+          Повторы: ${Math.min(...repValues)}-${Math.max(...repValues)}
+        </span>
+      </div>
+
+      ${renderExerciseProgressChart(series)}
+
+      <div class="progress-note">
+        Линии читаются каждая в своей шкале, чтобы рост веса и повторений было видно одновременно.
+      </div>
+    </section>
+  `;
+}
+
+function renderProgressSnapshotCard(title, value, subtitle) {
+  return `
+    <article class="progress-mini-card">
+      <div class="progress-mini-label">${escapeHtml(title)}</div>
+      <div class="progress-mini-value">${escapeHtml(value)}</div>
+      <div class="progress-mini-subtitle">${escapeHtml(subtitle)}</div>
+    </article>
+  `;
+}
+
+function renderExerciseProgressChart(series) {
+  const width = 640;
+  const height = 260;
+  const paddingX = 24;
+  const top = 18;
+  const bottom = 30;
+  const weightPoints = buildChartPoints(
+    series.map((point) => point.bestWeight),
+    width,
+    height,
+    paddingX,
+    top,
+    bottom
+  );
+  const repPoints = buildChartPoints(
+    series.map((point) => point.bestReps),
+    width,
+    height,
+    paddingX,
+    top,
+    bottom
+  );
+
+  return `
+    <div class="progress-chart-wrap">
+      <svg class="progress-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="График прогресса">
+        ${[0.2, 0.5, 0.8]
+          .map((ratio) => {
+            const y = top + (height - top - bottom) * ratio;
+            return `<line class="progress-grid-line" x1="${paddingX}" y1="${y}" x2="${width - paddingX}" y2="${y}"></line>`;
+          })
+          .join("")}
+        <polyline class="progress-line progress-line-weight" points="${buildPolyline(weightPoints)}"></polyline>
+        <polyline class="progress-line progress-line-reps" points="${buildPolyline(repPoints)}"></polyline>
+        ${weightPoints
+          .map(
+            (point, index) => `
+              <circle class="progress-point progress-point-weight" cx="${point.x}" cy="${point.y}" r="5"></circle>
+              <title>${escapeHtml(
+                `${formatShortDate(series[index].workoutDate)} · Вес ${formatWeight(
+                  series[index].bestWeight
+                )} кг`
+              )}</title>
+            `
+          )
+          .join("")}
+        ${repPoints
+          .map(
+            (point, index) => `
+              <circle class="progress-point progress-point-reps" cx="${point.x}" cy="${point.y}" r="5"></circle>
+              <title>${escapeHtml(
+                `${formatShortDate(series[index].workoutDate)} · Повторы ${series[index].bestReps}`
+              )}</title>
+            `
+          )
+          .join("")}
+      </svg>
+
+      <div class="progress-axis-row">
+        <span>${escapeHtml(formatShortDate(series[0].workoutDate))}</span>
+        <span>${escapeHtml(formatShortDate(series[series.length - 1].workoutDate))}</span>
       </div>
     </div>
   `;
+}
+
+function buildChartPoints(values, width, height, paddingX, top, bottom) {
+  const innerWidth = width - paddingX * 2;
+  const innerHeight = height - top - bottom;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  return values.map((value, index) => {
+    const x =
+      values.length === 1 ? width / 2 : paddingX + (index * innerWidth) / (values.length - 1);
+    const ratio = max === min ? 0.5 : (value - min) / (max - min);
+    const y = top + innerHeight - ratio * innerHeight;
+    return { x, y };
+  });
+}
+
+function buildPolyline(points) {
+  return points.map((point) => `${point.x},${point.y}`).join(" ");
+}
+
+function getRangeDescription(rangeKey) {
+  const range = PROGRESS_RANGES.find((item) => item.key === rangeKey) || PROGRESS_RANGES[1];
+  if (range.days == null) {
+    return "за всю историю";
+  }
+  return `за последние ${range.days} дн.`;
 }
 
 function renderNewWorkoutScreen() {
@@ -1421,8 +1693,14 @@ function formatWeight(value) {
   return formatter.format(value);
 }
 
-function formatVolume(value) {
-  return `${Math.trunc(value)} kg`;
+function formatSignedWeight(value) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatWeight(value)} кг`;
+}
+
+function formatSignedCount(value) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value} повт.`;
 }
 
 function escapeHtml(value) {
@@ -1450,6 +1728,19 @@ function writeJsonStorage(key, value) {
 function readTextStorage(key, fallback) {
   try {
     return localStorage.getItem(key) || fallback;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function readNumberStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null || raw === "") {
+      return fallback;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
   } catch (_error) {
     return fallback;
   }

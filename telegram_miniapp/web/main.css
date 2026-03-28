@@ -259,6 +259,212 @@ button {
   font-size: 13px;
 }
 
+.progress-filter-card,
+.progress-panel {
+  padding: 16px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--page-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.select-wrap {
+  position: relative;
+}
+
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(17, 17, 17, 0.5);
+  border-bottom: 2px solid rgba(17, 17, 17, 0.5);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+.select-input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 42px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+  color: var(--page-ink);
+  font-size: 16px;
+  font-weight: 600;
+  appearance: none;
+}
+
+.progress-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.progress-panel-head {
+  display: grid;
+  gap: 12px;
+}
+
+.progress-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--page-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.legend-swatch-weight {
+  background: #1f3db7;
+}
+
+.legend-swatch-reps {
+  background: #12a17c;
+}
+
+.progress-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.progress-mini-card {
+  padding: 14px;
+  border-radius: 16px;
+  background: #f7f8fb;
+}
+
+.progress-mini-label {
+  color: var(--page-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.progress-mini-value {
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.progress-mini-subtitle {
+  margin-top: 4px;
+  color: var(--page-muted);
+  font-size: 13px;
+}
+
+.progress-scale-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scale-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scale-pill-weight {
+  background: rgba(31, 61, 183, 0.1);
+  color: #1f3db7;
+}
+
+.scale-pill-reps {
+  background: rgba(18, 161, 124, 0.12);
+  color: #0e7b5f;
+}
+
+.progress-chart-wrap {
+  border-radius: 18px;
+  padding: 14px 14px 10px;
+  background:
+    radial-gradient(circle at top left, rgba(31, 61, 183, 0.08), transparent 38%),
+    radial-gradient(circle at bottom right, rgba(18, 161, 124, 0.08), transparent 42%),
+    #fbfcfe;
+  border: 1px solid rgba(17, 17, 17, 0.06);
+}
+
+.progress-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.progress-grid-line {
+  stroke: rgba(17, 17, 17, 0.08);
+  stroke-width: 1;
+}
+
+.progress-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.progress-line-weight {
+  stroke: #1f3db7;
+}
+
+.progress-line-reps {
+  stroke: #12a17c;
+}
+
+.progress-point {
+  stroke: #ffffff;
+  stroke-width: 3;
+}
+
+.progress-point-weight {
+  fill: #1f3db7;
+}
+
+.progress-point-reps {
+  fill: #12a17c;
+}
+
+.progress-axis-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--page-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progress-note {
+  color: var(--page-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .draft-banner {
   padding: 16px 18px;
   border: 1px solid rgba(69, 98, 208, 0.14);
@@ -398,6 +604,18 @@ button {
 .topbar .icon-button {
   width: 42px;
   padding: 0;
+}
+
+.topbar-refresh-button {
+  min-height: 40px;
+  min-width: 0;
+  width: auto;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  color: var(--page-ink);
+  white-space: nowrap;
 }
 
 .muted-note {
@@ -621,6 +839,7 @@ button {
   }
 
   .grid-2,
+  .progress-summary-grid,
   .button-row,
   .modal-actions {
     grid-template-columns: 1fr;
@@ -634,6 +853,16 @@ button {
 
   .topbar-title {
     font-size: 22px;
+  }
+
+  .topbar-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbar-meta {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .value-display {
