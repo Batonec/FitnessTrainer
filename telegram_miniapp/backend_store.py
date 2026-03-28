@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 from contextlib import closing, contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,9 @@ def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], 
         )
 
     workout_date = str(payload.get("workout_date", "")).strip()
-    if len(workout_date) != 10:
+    try:
+        date.fromisoformat(workout_date)
+    except ValueError as exc:
         raise ValueError("workout_date must be in YYYY-MM-DD format")
 
     client_id = str(payload.get("client_id") or payload.get("id") or "").strip()
@@ -224,10 +227,13 @@ class MiniAppStore:
                 (telegram_user_id,),
             ).fetchone()
 
+            username = str(telegram_user.get("username") or "").strip() or None
+            first_name = str(telegram_user.get("first_name") or "").strip() or "Telegram"
+            last_name = str(telegram_user.get("last_name") or "").strip() or None
             values = (
-                str(telegram_user.get("username") or "").strip() or None,
-                str(telegram_user.get("first_name") or "Telegram").strip(),
-                str(telegram_user.get("last_name") or "").strip() or None,
+                username,
+                first_name,
+                last_name,
                 timestamp,
             )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib
 import json
 import os
@@ -14,6 +16,7 @@ from email.message import Message
 from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlencode
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -56,6 +59,37 @@ def sample_workout_payload(
             ],
         },
     }
+
+
+def build_signed_init_data(
+    bot_token: str,
+    *,
+    auth_date: int,
+    user: dict[str, Any] | None = None,
+    extra_fields: dict[str, str] | None = None,
+) -> str:
+    pairs: dict[str, str] = {
+        "auth_date": str(auth_date),
+    }
+    if user is not None:
+        pairs["user"] = json.dumps(user, separators=(",", ":"), ensure_ascii=False)
+    if extra_fields:
+        pairs.update(extra_fields)
+
+    data_check_string = "\n".join(
+        f"{key}={value}" for key, value in sorted(pairs.items(), key=lambda item: item[0])
+    )
+    secret_key = hmac.new(
+        b"WebAppData",
+        bot_token.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    pairs["hash"] = hmac.new(
+        secret_key,
+        data_check_string.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return urlencode(pairs)
 
 
 @contextmanager

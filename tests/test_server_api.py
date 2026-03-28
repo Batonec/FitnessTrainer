@@ -1,11 +1,29 @@
 from __future__ import annotations
 
+import time
 import unittest
 
-from support import JsonHttpClient, running_miniapp_server, sample_workout_payload
+from support import (
+    JsonHttpClient,
+    build_signed_init_data,
+    running_miniapp_server,
+    sample_workout_payload,
+)
 
 
 class ServerApiTest(unittest.TestCase):
+    def test_health_endpoint_reports_runtime_flags(self) -> None:
+        with running_miniapp_server(allow_debug_user=True, dev_mode=True, bot_token="token-123") as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("GET", "/api/health")
+
+            self.assertEqual(response.status, 200)
+            self.assertTrue(response.payload["ok"])
+            self.assertTrue(response.payload["bot_token_configured"])
+            self.assertTrue(response.payload["debug_user_enabled"])
+            self.assertIn("trainer.db", response.payload["db_path"])
+
     def test_session_resolve_returns_debug_user_when_debug_is_enabled(self) -> None:
         with running_miniapp_server(allow_debug_user=True) as app:
             client = JsonHttpClient(app.base_url)
@@ -25,6 +43,18 @@ class ServerApiTest(unittest.TestCase):
 
             self.assertEqual(response.status, 401)
             self.assertIn("Open Mini App from Telegram", response.payload["reason"])
+
+    def test_session_resolve_reuses_existing_cookie_when_initdata_is_missing(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+
+            first_response = client.request_json("POST", "/api/session/resolve", {})
+            second_response = client.request_json("POST", "/api/session/resolve", {})
+
+            self.assertEqual(first_response.status, 200)
+            self.assertEqual(second_response.status, 200)
+            self.assertEqual(first_response.payload["user"]["id"], second_response.payload["user"]["id"])
+            self.assertNotIn("auth_mode", second_response.payload)
 
     def test_unsafe_telegram_user_fallback_persists_its_own_session(self) -> None:
         with running_miniapp_server(allow_debug_user=False) as app:
@@ -85,6 +115,106 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(response.payload["auth_mode"], "telegram_unsafe")
             self.assertIn("Hash mismatch", response.payload["validation_reason"])
             self.assertEqual(response.payload["user"]["auth_source"], "telegram_unsafe")
+
+    def test_invalid_initdata_without_fallback_returns_bad_request(self) -> None:
+        with running_miniapp_server(allow_debug_user=False, bot_token="valid-test-token") as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {"initData": "user=%7B%22id%22%3A1%7D&auth_date=123456&hash=definitely-invalid"},
+            )
+
+            self.assertEqual(response.status, 400)
+            self.assertIn("Hash mismatch", response.payload["reason"])
+
+    def test_session_resolve_accepts_valid_signed_initdata(self) -> None:
+        bot_token = "server-valid-bot-token"
+        init_data = build_signed_init_data(
+            bot_token,
+            auth_date=int(time.time()),
+            user={"id": 900100, "first_name": "Signed", "last_name": "User", "username": "signed_user"},
+        )
+        with running_miniapp_server(allow_debug_user=False, bot_token=bot_token) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("POST", "/api/session/resolve", {"initData": init_data})
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["auth_mode"], "telegram")
+            self.assertEqual(response.payload["user"]["telegram_user_id"], 900100)
+            self.assertEqual(response.payload["user"]["display_name"], "Signed User")
+
+    def test_get_workouts_uses_debug_fallback_cookie_when_enabled(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("GET", "/api/workouts")
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["user"]["auth_source"], "debug")
+            self.assertIn("trainer_session=", response.headers.get("Set-Cookie", ""))
+
+    def test_get_workouts_requires_session_when_debug_is_disabled(self) -> None:
+        with running_miniapp_server(allow_debug_user=False) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("GET", "/api/workouts")
+
+            self.assertEqual(response.status, 401)
+            self.assertIn("No active session", response.payload["reason"])
+
+    def test_workouts_endpoint_rejects_invalid_payload(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            response = client.request_json(
+                "POST",
+                "/api/workouts",
+                {
+                    "client_id": "invalid-workout",
+                    "workout_date": "2026-03-28",
+                    "plan_id": None,
+                    "data": {"notes": None, "load_type": None, "exercises": []},
+                },
+            )
+
+            self.assertEqual(response.status, 400)
+            self.assertIn("at least one exercise", response.payload["reason"])
+
+    def test_workouts_endpoint_is_idempotent_via_api_for_same_client_id(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            first_response = client.request_json(
+                "POST",
+                "/api/workouts",
+                sample_workout_payload(client_id="api-idempotent"),
+            )
+            second_response = client.request_json(
+                "POST",
+                "/api/workouts",
+                sample_workout_payload(client_id="api-idempotent"),
+            )
+            workouts_response = client.request_json("GET", "/api/workouts")
+
+            self.assertEqual(first_response.status, 201)
+            self.assertEqual(second_response.status, 200)
+            self.assertFalse(second_response.payload["created"])
+            self.assertEqual(first_response.payload["workout"]["id"], second_response.payload["workout"]["id"])
+            self.assertEqual(len(workouts_response.payload["workouts"]), 1)
+
+    def test_telegram_auth_endpoint_reports_empty_initdata(self) -> None:
+        with running_miniapp_server(allow_debug_user=False) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("POST", "/api/telegram/auth", {"initData": ""})
+
+            self.assertEqual(response.status, 400)
+            self.assertIn("initData is empty", response.payload["reason"])
 
     def test_workouts_endpoint_orders_same_day_entries_from_newest_to_oldest(self) -> None:
         with running_miniapp_server(allow_debug_user=True) as app:
