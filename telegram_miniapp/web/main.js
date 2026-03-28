@@ -757,11 +757,16 @@ function renderTopbar() {
     new: "Собери новую тренировку на локальном кэше без backend",
   };
 
-  let actionMarkup = `<div class="topbar-meta"><span class="pill">Local cache</span></div>`;
+  const buildPills = `
+    <span class="pill">Local cache</span>
+    <span class="pill pill-build">Preview build</span>
+  `;
+
+  let actionMarkup = `<div class="topbar-meta">${buildPills}</div>`;
   if (state.currentTab === "progress") {
     actionMarkup = `
       <div class="topbar-meta">
-        <span class="pill">Local cache</span>
+        ${buildPills}
         <button class="icon-button" data-action="refresh-progress" aria-label="Refresh">
           ${iconMarkup("refresh")}
         </button>
@@ -772,7 +777,7 @@ function renderTopbar() {
   if (state.currentTab === "new" && state.workoutExercises.length > 0) {
     actionMarkup = `
       <div class="topbar-meta">
-        <span class="pill">Local cache</span>
+        ${buildPills}
         <button class="action-button" data-action="finish-workout">Закончить тренировку</button>
       </div>
     `;
