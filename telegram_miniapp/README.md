@@ -4,7 +4,7 @@
 
 - бот присылает кнопку `Open Trainer`
 - Telegram открывает полноценный локальный web-интерфейс Trainer
-- приложение работает на JSON-фикстурах и backend API на SQLite
+- приложение работает на backend API на SQLite и JSON-справочнике упражнений
 - в обычном локальном браузере без Telegram доступен `default browser user` для отладки
 - если Telegram не прислал signed `initData`, доступен `telegram_unsafe` fallback
 - черновик новой тренировки восстанавливается после перезагрузки страницы
@@ -16,7 +16,7 @@
 - `telegram_miniapp/server.py` — backend API и HTTP-сервер без внешних зависимостей
 - `telegram_miniapp/backend_store.py` — SQLite storage для пользователей и тренировок
 - `telegram_miniapp/bot.py` — простой Telegram-бот на long polling
-- `telegram_miniapp/web/` — web-приложение и локальные фикстуры
+- `telegram_miniapp/web/` — web-приложение и локальный справочник упражнений
 - `tests/` — unit, integration и browser e2e тесты
 
 ## Что нужно
@@ -195,7 +195,7 @@ Secrets добавляются в:
 - экран `Trainings`
 - экран `Progress`
 - экран `Новая тренировка`
-- работу на JSON-фикстурах, SQLite backend и `localStorage` только для UI-состояния
+- работу на SQLite backend и `localStorage` только для UI-состояния
 - восстановление черновика и кнопку `Начать заново`
 
 Если нужен именно Telegram auth/debug flow, открой `/stub.html`.

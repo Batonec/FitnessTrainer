@@ -23,7 +23,6 @@ const state = {
   selectedRange: readTextStorage(STORAGE_KEYS.range, "DAYS_30"),
   currentUser: null,
   exercises: [],
-  fixtureWorkouts: [],
   customWorkouts: sortWorkouts(readJsonStorage(STORAGE_KEYS.customWorkouts, [])),
   selectedExerciseId: null,
   workoutExercises: [],
@@ -56,16 +55,12 @@ async function bootstrap() {
   try {
     await resolveSession();
     await migrateLegacyCustomWorkouts();
-    const [exercisesResponse, fixtureWorkoutsResponse, workoutsResponse] = await Promise.all([
+    const [exercisesResponse, workoutsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
-      fetchJson("/data/workouts.json"),
       fetchJson("/api/workouts"),
     ]);
 
     state.exercises = Array.isArray(exercisesResponse.exercises) ? exercisesResponse.exercises : [];
-    state.fixtureWorkouts = sortWorkouts(
-      Array.isArray(fixtureWorkoutsResponse.workouts) ? fixtureWorkoutsResponse.workouts : []
-    );
     state.customWorkouts = sortWorkouts(
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
@@ -322,15 +317,11 @@ async function refreshLocalData() {
   }
   try {
     await resolveSession();
-    const [exercisesResponse, fixtureWorkoutsResponse, workoutsResponse] = await Promise.all([
+    const [exercisesResponse, workoutsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
-      fetchJson("/data/workouts.json"),
       fetchJson("/api/workouts"),
     ]);
     state.exercises = Array.isArray(exercisesResponse.exercises) ? exercisesResponse.exercises : [];
-    state.fixtureWorkouts = sortWorkouts(
-      Array.isArray(fixtureWorkoutsResponse.workouts) ? fixtureWorkoutsResponse.workouts : []
-    );
     state.customWorkouts = sortWorkouts(
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
@@ -404,7 +395,7 @@ function countDraftExercises() {
 }
 
 function getAllWorkouts() {
-  return sortWorkouts([...state.customWorkouts, ...state.fixtureWorkouts]);
+  return sortWorkouts(state.customWorkouts);
 }
 
 function sortWorkouts(workouts) {
@@ -418,13 +409,6 @@ function sortWorkouts(workouts) {
       const updatedAtDiff = (Number(right.updated_at) || 0) - (Number(left.updated_at) || 0);
       if (updatedAtDiff !== 0) {
         return updatedAtDiff;
-      }
-
-      const fixtureBiasDiff =
-        (Number(Boolean(right.created_at || right.updated_at)) || 0) -
-        (Number(Boolean(left.created_at || left.updated_at)) || 0);
-      if (fixtureBiasDiff !== 0) {
-        return fixtureBiasDiff;
       }
 
       return (Number(right.id) || 0) - (Number(left.id) || 0);
@@ -923,7 +907,7 @@ function renderTopbar() {
   };
 
   const subtitles = {
-    trainings: "История тренировок из JSON-фикстур и серверного хранилища",
+    trainings: "История тренировок из серверного хранилища",
     progress: "Сводка по объему, лучшим упражнениям и сохраненным тренировкам",
     new: state.currentUser?.is_default_debug_user
       ? "Сохраним тренировку на backend под default browser user"

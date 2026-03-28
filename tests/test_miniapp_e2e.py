@@ -60,16 +60,20 @@ class MiniAppE2ETest(unittest.TestCase):
         self.page.goto(self.app.base_url, wait_until="networkidle")
         expect(self.page.locator(".topbar-title")).to_have_text("Новая тренировка")
 
+    def add_default_set(self) -> None:
+        self.page.locator('[data-action="start-adding-set"]').click()
+        self.page.locator('[data-action="set-apply"]').click()
+
     def test_can_create_two_same_day_workouts_and_latest_one_is_first(self) -> None:
         self.open_app()
 
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Squat").click()
-        self.page.locator('[data-action="add-standard-set"]').click()
+        self.add_default_set()
         self.page.locator('[data-action="finish-workout"]').click()
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Pull Up").click()
-        self.page.locator('[data-action="add-standard-set"]').click()
+        self.add_default_set()
         self.page.locator('[data-action="finish-workout"]').click()
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
@@ -80,7 +84,7 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
 
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Bench Press").click()
-        self.page.locator('[data-action="add-standard-set"]').click()
+        self.add_default_set()
         self.page.reload(wait_until="networkidle")
 
         expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
