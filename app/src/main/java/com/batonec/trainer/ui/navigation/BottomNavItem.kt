@@ -19,7 +19,7 @@ sealed class BottomNavItem(
 
     object Next : BottomNavItem(
         route = "next",
-        title = "Next",
+        title = "Progress",
         icon = Icons.Default.DateRange
     )
 
@@ -29,4 +29,3 @@ sealed class BottomNavItem(
         icon = Icons.Default.Star
     )
 }
-
