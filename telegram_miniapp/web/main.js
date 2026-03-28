@@ -13,6 +13,8 @@ const PROGRESS_RANGES = [
   { key: "DAYS_30", label: "30D", days: 30 },
   { key: "ALL", label: "All", days: null },
 ];
+const TELEGRAM_INITDATA_WAIT_MS = 1800;
+const TELEGRAM_INITDATA_POLL_MS = 120;
 
 const state = {
   booting: true,
@@ -86,6 +88,12 @@ function setupTelegramShell() {
 
   tg.ready();
   tg.expand();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function startLiveReload() {
@@ -171,10 +179,28 @@ async function postJson(url, payload) {
 }
 
 async function resolveSession() {
+  const initData = await resolveTelegramInitData();
   const payload = await postJson("/api/session/resolve", {
-    initData: tg?.initData || "",
+    initData,
   });
   state.currentUser = payload.user || null;
+}
+
+async function resolveTelegramInitData() {
+  if (!tg) {
+    return "";
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= TELEGRAM_INITDATA_WAIT_MS) {
+    const initData = String(tg.initData || "").trim();
+    if (initData) {
+      return initData;
+    }
+    await sleep(TELEGRAM_INITDATA_POLL_MS);
+  }
+
+  return String(tg.initData || "").trim();
 }
 
 function handleClick(event) {
@@ -275,6 +301,7 @@ async function refreshLocalData() {
     showFlash("Данные с сервера обновлены");
   }
   try {
+    await resolveSession();
     const [exercisesResponse, fixtureWorkoutsResponse, workoutsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
       fetchJson("/data/workouts.json"),
