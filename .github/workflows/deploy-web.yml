@@ -57,6 +57,15 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
+      - name: Test SSH connection
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "whoami && hostname"
+
       - name: Sync web files
         if: steps.secrets.outputs.ready == 'true'
         env:
