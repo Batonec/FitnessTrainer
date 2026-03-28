@@ -1335,8 +1335,8 @@ function renderSetModal() {
 function renderBottomNav() {
   const items = [
     { key: "trainings", label: "Trainings", icon: "trainings" },
-    { key: "progress", label: "Progress", icon: "progress" },
     { key: "new", label: "New", icon: "new" },
+    { key: "progress", label: "Progress", icon: "progress" },
   ];
 
   return `
@@ -1384,7 +1384,7 @@ function renderEmptyState(title) {
 }
 
 function buildTopbarPills() {
-  const pills = ['<span class="pill">Server sync</span>'];
+  const pills = [];
 
   if (state.currentUser?.is_default_debug_user) {
     pills.push('<span class="pill pill-build">Default browser user</span>');
