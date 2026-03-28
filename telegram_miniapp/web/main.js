@@ -182,6 +182,7 @@ async function resolveSession() {
   const initData = await resolveTelegramInitData();
   const payload = await postJson("/api/session/resolve", {
     initData,
+    unsafeUser: getTelegramUnsafeUser(),
   });
   state.currentUser = payload.user || null;
 }
@@ -201,6 +202,20 @@ async function resolveTelegramInitData() {
   }
 
   return String(tg.initData || "").trim();
+}
+
+function getTelegramUnsafeUser() {
+  if (!tg?.initDataUnsafe?.user) {
+    return null;
+  }
+
+  return {
+    id: tg.initDataUnsafe.user.id,
+    first_name: tg.initDataUnsafe.user.first_name,
+    last_name: tg.initDataUnsafe.user.last_name,
+    username: tg.initDataUnsafe.user.username,
+    language_code: tg.initDataUnsafe.user.language_code,
+  };
 }
 
 function handleClick(event) {
@@ -1311,6 +1326,8 @@ function buildTopbarPills() {
     pills.push('<span class="pill pill-build">Default browser user</span>');
   } else if (state.currentUser?.auth_source === "telegram") {
     pills.push('<span class="pill pill-build">Telegram user</span>');
+  } else if (state.currentUser?.auth_source === "telegram_unsafe") {
+    pills.push('<span class="pill pill-build">Telegram fallback</span>');
   }
 
   return pills.join("");

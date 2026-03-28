@@ -298,6 +298,30 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            unsafe_telegram_user = payload.get("unsafeUser")
+            if isinstance(unsafe_telegram_user, dict):
+                try:
+                    user = STORE.upsert_telegram_user(
+                        unsafe_telegram_user,
+                        auth_source="telegram_unsafe",
+                    )
+                except ValueError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
+                    return
+
+                headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "user": user,
+                        "auth_mode": "telegram_unsafe",
+                        "warning": "Mini App launched without signed initData, using Telegram user fallback.",
+                    },
+                    extra_headers=headers,
+                )
+                return
+
             if debug_user_enabled():
                 user = STORE.ensure_debug_user(
                     DEFAULT_DEBUG_USER_ALIAS,

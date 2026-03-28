@@ -195,8 +195,14 @@ class MiniAppStore:
             raise RuntimeError("Failed to create debug user")
         return self._serialize_user(row)
 
-    def upsert_telegram_user(self, telegram_user: dict[str, Any]) -> dict[str, Any]:
+    def upsert_telegram_user(
+        self,
+        telegram_user: dict[str, Any],
+        auth_source: str = "telegram",
+    ) -> dict[str, Any]:
         telegram_user_id = telegram_user.get("id")
+        if isinstance(telegram_user_id, str) and telegram_user_id.isdigit():
+            telegram_user_id = int(telegram_user_id)
         if not isinstance(telegram_user_id, int):
             raise ValueError("Telegram user id is missing in initData")
 
@@ -231,7 +237,7 @@ class MiniAppStore:
                     """,
                     (
                         telegram_user_id,
-                        "telegram",
+                        auth_source,
                         None,
                         values[0],
                         values[1],
@@ -244,10 +250,10 @@ class MiniAppStore:
                 connection.execute(
                     """
                     UPDATE users
-                    SET username = ?, first_name = ?, last_name = ?, updated_at = ?
+                    SET auth_source = ?, username = ?, first_name = ?, last_name = ?, updated_at = ?
                     WHERE telegram_user_id = ?
                     """,
-                    (*values, telegram_user_id),
+                    (auth_source, *values, telegram_user_id),
                 )
 
             row = connection.execute(
