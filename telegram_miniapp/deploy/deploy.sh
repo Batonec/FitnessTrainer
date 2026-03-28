@@ -7,6 +7,7 @@ MINIAPP_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 TARGET_HOST="${TRAINER_VPS_HOST:-root@89.124.83.32}"
 REMOTE_BASE="${TRAINER_REMOTE_BASE:-/opt/trainer-miniapp}"
 BOT_SERVICE="${TRAINER_BOT_SERVICE:-trainer-miniapp-bot.service}"
+BACKEND_SERVICE="${TRAINER_BACKEND_SERVICE:-trainer-miniapp-backend.service}"
 
 
 log() {
@@ -19,12 +20,14 @@ usage() {
 Usage:
   $(basename "$0") web
   $(basename "$0") bot
+  $(basename "$0") backend
   $(basename "$0") all
 
 Optional environment variables:
   TRAINER_VPS_HOST      SSH target, default: $TARGET_HOST
   TRAINER_REMOTE_BASE   Remote base dir, default: $REMOTE_BASE
   TRAINER_BOT_SERVICE   systemd service name, default: $BOT_SERVICE
+  TRAINER_BACKEND_SERVICE systemd service name, default: $BACKEND_SERVICE
 EOF
 }
 
@@ -91,6 +94,21 @@ deploy_bot() {
 }
 
 
+deploy_backend() {
+  log "Deploying backend files to $TARGET_HOST"
+  remote "mkdir -p '$REMOTE_BASE/app'"
+  scp "$MINIAPP_DIR/server.py" "${TARGET_HOST}:${REMOTE_BASE}/app/server.py" >/dev/null
+  scp "$MINIAPP_DIR/backend_store.py" "${TARGET_HOST}:${REMOTE_BASE}/app/backend_store.py" >/dev/null
+  scp "$SCRIPT_DIR/trainer-miniapp-backend.service" "${TARGET_HOST}:/etc/systemd/system/${BACKEND_SERVICE}" >/dev/null
+
+  remote "chmod 644 '$REMOTE_BASE/app/server.py' '$REMOTE_BASE/app/backend_store.py' '/etc/systemd/system/$BACKEND_SERVICE'"
+  remote "test -f /etc/trainer-miniapp/backend.env"
+  remote "systemctl daemon-reload && systemctl enable --now '$BACKEND_SERVICE' && systemctl restart '$BACKEND_SERVICE'"
+
+  log "Backend deploy finished"
+}
+
+
 main() {
   local target="${1:-web}"
 
@@ -105,9 +123,13 @@ main() {
     bot)
       deploy_bot
       ;;
+    backend)
+      deploy_backend
+      ;;
     all)
       deploy_web
       deploy_bot
+      deploy_backend
       ;;
     -h|--help|help)
       usage

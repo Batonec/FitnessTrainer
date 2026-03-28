@@ -7,20 +7,35 @@ import json
 import mimetypes
 import os
 import time
+from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qsl, urlparse
+
+from backend_store import MiniAppStore
 
 
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "web"
+STATIC_DIR = Path(os.getenv("MINIAPP_STATIC_DIR", str(BASE_DIR / "web"))).resolve()
+DATA_DIR = BASE_DIR / "data"
 HOST = os.getenv("MINIAPP_HOST", "127.0.0.1")
 PORT = int(os.getenv("MINIAPP_PORT", "8080"))
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 MAX_AUTH_AGE_SECONDS = int(os.getenv("MINIAPP_MAX_AUTH_AGE", "86400"))
 DEV_MODE = os.getenv("MINIAPP_DEV_MODE", "").lower() in {"1", "true", "yes", "on"}
+ALLOW_DEBUG_USER = os.getenv("MINIAPP_ALLOW_DEBUG_USER", "").lower() in {"1", "true", "yes", "on"}
+DEFAULT_DEBUG_USER_ALIAS = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_ALIAS", "browser-default")
+DEFAULT_DEBUG_USER_FIRST_NAME = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_FIRST_NAME", "Browser")
+DEFAULT_DEBUG_USER_LAST_NAME = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_LAST_NAME", "Debug")
+DB_PATH = Path(os.getenv("MINIAPP_DB_PATH", str(DATA_DIR / "trainer.db")))
+SESSION_COOKIE_NAME = "trainer_session"
+SESSION_SECRET = os.getenv("MINIAPP_SESSION_SECRET") or BOT_TOKEN or "trainer-dev-session-secret"
+SESSION_MAX_AGE_SECONDS = int(os.getenv("MINIAPP_SESSION_MAX_AGE", "2592000"))
+COOKIE_SECURE = os.getenv("MINIAPP_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
 WATCHED_EXTENSIONS = {".py", ".html", ".css", ".js", ".json", ".md"}
+STORE = MiniAppStore(DB_PATH)
 
 
 def iter_watched_files() -> list[Path]:
@@ -128,6 +143,42 @@ def validate_init_data(init_data: str, bot_token: str) -> dict[str, object]:
     }
 
 
+def debug_user_enabled() -> bool:
+    return DEV_MODE or ALLOW_DEBUG_USER
+
+
+def make_session_value(user_id: int) -> str:
+    payload = str(user_id)
+    signature = hmac.new(
+        SESSION_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def read_session_user_id(cookie_value: str) -> int | None:
+    if not cookie_value or "." not in cookie_value:
+        return None
+
+    raw_user_id, received_signature = cookie_value.split(".", 1)
+    try:
+        user_id = int(raw_user_id)
+    except ValueError:
+        return None
+
+    expected_signature = hmac.new(
+        SESSION_SECRET.encode("utf-8"),
+        raw_user_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected_signature, received_signature):
+        return None
+
+    return user_id
+
+
 class MiniAppHandler(BaseHTTPRequestHandler):
     server_version = "TrainerMiniApp/0.1"
 
@@ -148,12 +199,34 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "server_time": int(time.time()),
                     "bot_token_configured": bool(BOT_TOKEN),
+                    "debug_user_enabled": debug_user_enabled(),
+                    "db_path": str(DB_PATH),
                 },
             )
             return
 
         if path == "/api/dev/version":
             self._send_json(HTTPStatus.OK, build_dev_version())
+            return
+
+        if path == "/api/workouts":
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            workouts = STORE.list_workouts(int(user["id"]))
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "user": user, "workouts": workouts},
+                extra_headers=headers,
+            )
             return
 
         static_path = self._resolve_static_path(path)
@@ -165,34 +238,147 @@ class MiniAppHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/api/telegram/auth":
-            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
+        if path == "/api/telegram/auth":
+            payload = self._read_json_body()
+            if payload is None:
+                return
+
+            init_data = str(payload.get("initData", ""))
+            validation_result = validate_init_data(init_data, BOT_TOKEN)
+            status = HTTPStatus.OK if validation_result.get("ok") else HTTPStatus.BAD_REQUEST
+            self._send_json(status, validation_result)
             return
 
-        content_length = int(self.headers.get("Content-Length", "0"))
-        payload_raw = self.rfile.read(content_length).decode("utf-8")
+        if path == "/api/session/resolve":
+            payload = self._read_json_body()
+            if payload is None:
+                return
 
-        try:
-            payload = json.loads(payload_raw or "{}")
-        except json.JSONDecodeError:
-            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": "Invalid JSON body"})
+            current_user, current_headers = self._resolve_current_user()
+            if current_user is not None and not payload.get("initData"):
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, "user": current_user},
+                    extra_headers=current_headers,
+                )
+                return
+
+            init_data = str(payload.get("initData", ""))
+            if init_data:
+                validation_result = validate_init_data(init_data, BOT_TOKEN)
+                if not validation_result.get("ok"):
+                    self._send_json(HTTPStatus.BAD_REQUEST, validation_result)
+                    return
+
+                telegram_user = validation_result.get("received", {}).get("user")
+                if not isinstance(telegram_user, dict):
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"ok": False, "reason": "Telegram user payload is missing in initData"},
+                    )
+                    return
+
+                try:
+                    user = STORE.upsert_telegram_user(telegram_user)
+                except ValueError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
+                    return
+
+                headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "user": user,
+                        "auth_mode": "telegram",
+                        "auth_is_fresh": validation_result.get("auth_is_fresh"),
+                        "auth_age_seconds": validation_result.get("auth_age_seconds"),
+                    },
+                    extra_headers=headers,
+                )
+                return
+
+            if debug_user_enabled():
+                user = STORE.ensure_debug_user(
+                    DEFAULT_DEBUG_USER_ALIAS,
+                    DEFAULT_DEBUG_USER_FIRST_NAME,
+                    DEFAULT_DEBUG_USER_LAST_NAME,
+                )
+                headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, "user": user, "auth_mode": "debug"},
+                    extra_headers=headers,
+                )
+                return
+
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "ok": False,
+                    "reason": "Open Mini App from Telegram or enable debug user mode for browser access.",
+                },
+            )
             return
 
-        init_data = str(payload.get("initData", ""))
-        validation_result = validate_init_data(init_data, BOT_TOKEN)
-        status = HTTPStatus.OK if validation_result.get("ok") else HTTPStatus.BAD_REQUEST
-        self._send_json(status, validation_result)
+        if path == "/api/workouts":
+            payload = self._read_json_body()
+            if payload is None:
+                return
+
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            try:
+                workout, created = STORE.save_workout(int(user["id"]), payload)
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
+                return
+
+            self._send_json(
+                HTTPStatus.CREATED if created else HTTPStatus.OK,
+                {"ok": True, "created": created, "user": user, "workout": workout},
+                extra_headers=headers,
+            )
+            return
+
+        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"[miniapp] {self.address_string()} - {format % args}")
 
-    def _send_json(self, status: HTTPStatus, payload: dict[str, object]) -> None:
+    def _read_json_body(self) -> dict[str, Any] | None:
+        content_length = int(self.headers.get("Content-Length", "0"))
+        payload_raw = self.rfile.read(content_length).decode("utf-8")
+        try:
+            return json.loads(payload_raw or "{}")
+        except json.JSONDecodeError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": "Invalid JSON body"})
+            return None
+
+    def _send_json(
+        self,
+        status: HTTPStatus,
+        payload: dict[str, object],
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(key, value)
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -228,17 +414,58 @@ class MiniAppHandler(BaseHTTPRequestHandler):
 
         return None
 
+    def _build_session_cookie(self, user_id: int) -> str:
+        parts = [
+            f"{SESSION_COOKIE_NAME}={make_session_value(user_id)}",
+            "HttpOnly",
+            "Path=/",
+            f"Max-Age={SESSION_MAX_AGE_SECONDS}",
+            "SameSite=Lax",
+        ]
+        if COOKIE_SECURE:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def _resolve_current_user(
+        self,
+        allow_debug_fallback: bool = False,
+    ) -> tuple[dict[str, Any] | None, dict[str, str]]:
+        cookie_header = self.headers.get("Cookie", "")
+        if cookie_header:
+            cookies = SimpleCookie()
+            cookies.load(cookie_header)
+            raw_cookie = cookies.get(SESSION_COOKIE_NAME)
+            if raw_cookie is not None:
+                user_id = read_session_user_id(raw_cookie.value)
+                if user_id is not None:
+                    user = STORE.get_user_by_id(user_id)
+                    if user is not None:
+                        return user, {}
+
+        if allow_debug_fallback and debug_user_enabled():
+            user = STORE.ensure_debug_user(
+                DEFAULT_DEBUG_USER_ALIAS,
+                DEFAULT_DEBUG_USER_FIRST_NAME,
+                DEFAULT_DEBUG_USER_LAST_NAME,
+            )
+            return user, {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
+
+        return None, {}
+
 
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), MiniAppHandler)
     print(f"Trainer Mini App server listening on http://{HOST}:{PORT}")
     print(f"Static assets: {STATIC_DIR}")
+    print(f"SQLite database: {DB_PATH}")
     if BOT_TOKEN:
         print("Telegram initData verification: enabled")
     else:
         print("Telegram initData verification: disabled, set BOT_TOKEN to enable it")
     if DEV_MODE:
         print("Mini App dev mode: enabled")
+    if debug_user_enabled():
+        print("Browser debug user mode: enabled")
     server.serve_forever()
 
 

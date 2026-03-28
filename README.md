@@ -17,20 +17,23 @@
 
 - запуск Mini App из Telegram-бота;
 - экран `Trainings` с историей тренировок;
-- экран `Progress` с локальной аналитикой;
+- экран `Progress` с аналитикой по фикстурам и серверным тренировкам;
 - экран `New` для создания новой тренировки;
-- работа на локальных JSON-фикстурах и `localStorage`;
+- backend на SQLite для сохраненных тренировок;
+- browser debug user для локальной отладки без Telegram;
+- работа на JSON-фикстурах + backend-хранилище;
 - локальный dev-режим с автообновлением;
-- деплой web-части и бота на VPS.
+- деплой web-части, backend и бота на VPS.
 - GitHub Actions автодеплой на VPS по SSH.
 
 ## Бизнес-логика в двух словах
 
-Приложение сейчас работает в локальном web-режиме:
+Приложение сейчас работает в гибридном режиме:
 
 - справочник упражнений и стартовая история тренировок загружаются из JSON-файлов;
-- пользовательские тренировки сохраняются локально в браузере;
-- все экраны работают на объединенном наборе `фикстуры + локальный кэш`;
+- пользовательские тренировки сохраняются в backend на SQLite;
+- в локальной разработке браузер без Telegram автоматически работает как `default browser user`;
+- все экраны работают на объединенном наборе `фикстуры + серверные тренировки`;
 - новая тренировка сразу начинает участвовать в истории, прогрессе и логике подбора стандартного веса.
 
 Подробная спецификация находится здесь:
@@ -41,7 +44,8 @@
 
 - `telegram_miniapp/web/` — основной frontend Mini App;
 - `telegram_miniapp/bot.py` — Telegram-бот на long polling;
-- `telegram_miniapp/server.py` — локальный сервер для разработки;
+- `telegram_miniapp/server.py` — backend API и локальный сервер для разработки;
+- `telegram_miniapp/backend_store.py` — SQLite storage и user/workout persistence;
 - `telegram_miniapp/dev_server.py` — dev launcher с autoreload;
 - `telegram_miniapp/deploy/` — файлы для деплоя на VPS;
 - `BUSINESS_LOGIC.md` — подробное описание бизнес-правил приложения.
@@ -74,9 +78,10 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 
 ## GitHub Actions
 
-В репозитории настроены два workflow:
+В репозитории настроены три workflow:
 
 - [deploy-web.yml](./.github/workflows/deploy-web.yml) — автодеплой `telegram_miniapp/web/**` на VPS при пуше в `main`
+- [deploy-backend.yml](./.github/workflows/deploy-backend.yml) — деплой backend API и systemd unit на VPS
 - [deploy-bot.yml](./.github/workflows/deploy-bot.yml) — деплой `bot.py` и systemd unit на VPS при изменении бота
 
 Чтобы они заработали в GitHub, в secrets репозитория нужно добавить:

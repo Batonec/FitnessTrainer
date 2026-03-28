@@ -19,6 +19,7 @@ const state = {
   loadError: null,
   currentTab: readTextStorage(STORAGE_KEYS.tab, "new"),
   selectedRange: readTextStorage(STORAGE_KEYS.range, "DAYS_30"),
+  currentUser: null,
   exercises: [],
   fixtureWorkouts: [],
   customWorkouts: sortWorkouts(readJsonStorage(STORAGE_KEYS.customWorkouts, [])),
@@ -26,6 +27,7 @@ const state = {
   workoutExercises: [],
   isAddingExercise: false,
   isAddingSet: false,
+  isSavingWorkout: false,
   currentSetReps: 12,
   currentSetWeight: 0,
   flashMessage: "",
@@ -50,22 +52,29 @@ async function bootstrap() {
   render();
 
   try {
-    const [exercisesResponse, workoutsResponse] = await Promise.all([
+    await resolveSession();
+    await migrateLegacyCustomWorkouts();
+    const [exercisesResponse, fixtureWorkoutsResponse, workoutsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
       fetchJson("/data/workouts.json"),
+      fetchJson("/api/workouts"),
     ]);
 
     state.exercises = Array.isArray(exercisesResponse.exercises) ? exercisesResponse.exercises : [];
     state.fixtureWorkouts = sortWorkouts(
+      Array.isArray(fixtureWorkoutsResponse.workouts) ? fixtureWorkoutsResponse.workouts : []
+    );
+    state.customWorkouts = sortWorkouts(
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
+    state.currentUser = workoutsResponse.user || state.currentUser;
     ensureDraftExerciseStillExists();
     ensureNewWorkoutFlow();
     state.booting = false;
     render();
   } catch (error) {
     state.booting = false;
-    state.loadError = error.message || "Не удалось загрузить локальные фикстуры";
+    state.loadError = error.message || "Не удалось загрузить данные приложения";
     render();
   }
 }
@@ -120,11 +129,52 @@ async function checkDevVersion() {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} while loading ${url}`);
+    let reason = `HTTP ${response.status} while loading ${url}`;
+    try {
+      const payload = await response.json();
+      if (payload.reason) {
+        reason = String(payload.reason);
+      }
+    } catch (_error) {
+      // Ignore non-JSON error bodies.
+    }
+    throw new Error(reason);
   }
   return response.json();
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  let responsePayload = {};
+  try {
+    responsePayload = await response.json();
+  } catch (_error) {
+    responsePayload = {};
+  }
+
+  if (!response.ok) {
+    throw new Error(responsePayload.reason || `HTTP ${response.status} while posting to ${url}`);
+  }
+
+  return responsePayload;
+}
+
+async function resolveSession() {
+  const payload = await postJson("/api/session/resolve", {
+    initData: tg?.initData || "",
+  });
+  state.currentUser = payload.user || null;
 }
 
 function handleClick(event) {
@@ -222,25 +272,30 @@ async function refreshLocalData() {
     state.loadError = null;
     render();
   } else {
-    showFlash("Локальный кэш обновлен");
+    showFlash("Данные с сервера обновлены");
   }
   try {
-    const [exercisesResponse, workoutsResponse] = await Promise.all([
+    const [exercisesResponse, fixtureWorkoutsResponse, workoutsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
       fetchJson("/data/workouts.json"),
+      fetchJson("/api/workouts"),
     ]);
     state.exercises = Array.isArray(exercisesResponse.exercises) ? exercisesResponse.exercises : [];
     state.fixtureWorkouts = sortWorkouts(
+      Array.isArray(fixtureWorkoutsResponse.workouts) ? fixtureWorkoutsResponse.workouts : []
+    );
+    state.customWorkouts = sortWorkouts(
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
+    state.currentUser = workoutsResponse.user || state.currentUser;
     state.booting = false;
     state.loadError = null;
     ensureDraftExerciseStillExists();
     render();
   } catch (error) {
     state.booting = false;
-    state.loadError = error.message || "Не удалось обновить локальные данные";
-    showFlash(error.message || "Не удалось обновить локальные данные");
+    state.loadError = error.message || "Не удалось обновить данные";
+    showFlash(error.message || "Не удалось обновить данные");
   }
 }
 
@@ -265,10 +320,6 @@ function persistDraft() {
     selectedExerciseId: state.selectedExerciseId,
     workoutExercises: state.workoutExercises,
   });
-}
-
-function persistCustomWorkouts() {
-  writeJsonStorage(STORAGE_KEYS.customWorkouts, state.customWorkouts);
 }
 
 function ensureDraftExerciseStillExists() {
@@ -409,19 +460,39 @@ function finishExercise() {
   render();
 }
 
-function finishWorkout() {
+async function finishWorkout() {
   if (!state.workoutExercises.length) {
     resetDraftState();
     render();
     return;
   }
 
-  const workout = buildLocalWorkout();
-  state.customWorkouts = sortWorkouts([workout, ...state.customWorkouts]);
-  persistCustomWorkouts();
-  resetDraftState();
-  showFlash("Тренировка сохранена локально");
+  if (state.isSavingWorkout) {
+    return;
+  }
+
+  state.isSavingWorkout = true;
   render();
+
+  try {
+    const payload = await postJson("/api/workouts", buildLocalWorkout());
+    state.currentUser = payload.user || state.currentUser;
+    state.customWorkouts = sortWorkouts([
+      payload.workout,
+      ...state.customWorkouts.filter((workout) => workout.id !== payload.workout.id),
+    ]);
+    resetDraftState();
+    showFlash(
+      state.currentUser?.is_default_debug_user
+        ? "Тренировка сохранена на сервере для default user"
+        : "Тренировка сохранена на сервере"
+    );
+  } catch (error) {
+    showFlash(error.message || "Не удалось сохранить тренировку");
+  } finally {
+    state.isSavingWorkout = false;
+    render();
+  }
 }
 
 function resetDraftState() {
@@ -436,7 +507,7 @@ function resetDraftState() {
 
 function buildLocalWorkout() {
   return {
-    id: Math.floor(Date.now() / 1000),
+    client_id: buildWorkoutClientId(),
     workout_date: getLocalTodayIso(),
     plan_id: null,
     data: {
@@ -695,6 +766,29 @@ function getLocalTodayIso() {
   return new Date(now.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
 }
 
+function buildWorkoutClientId() {
+  return `workout-${Date.now()}`;
+}
+
+async function migrateLegacyCustomWorkouts() {
+  const legacyWorkouts = readJsonStorage(STORAGE_KEYS.customWorkouts, []);
+  if (!Array.isArray(legacyWorkouts) || !legacyWorkouts.length) {
+    return;
+  }
+
+  for (const workout of legacyWorkouts) {
+    const migratedWorkout = {
+      ...workout,
+      client_id: String(workout.id || buildWorkoutClientId()),
+    };
+    await postJson("/api/workouts", migratedWorkout);
+  }
+
+  localStorage.removeItem(STORAGE_KEYS.customWorkouts);
+  state.customWorkouts = [];
+  showFlash("Старые локальные тренировки перенесены на сервер");
+}
+
 function render() {
   if (state.booting) {
     root.innerHTML = `
@@ -702,7 +796,7 @@ function render() {
         <main class="screen loading-state">
           <div>
             <div class="loader"></div>
-            <p class="muted-note">Загружаю локальные фикстуры приложения...</p>
+            <p class="muted-note">Подключаю пользователя и загружаю серверные тренировки...</p>
           </div>
         </main>
       </div>
@@ -752,15 +846,14 @@ function renderTopbar() {
   };
 
   const subtitles = {
-    trainings: "История тренировок из локальных фикстур и кэша",
-    progress: "Сводка по объему, лучшим упражнениям и тяжелым сетам",
-    new: "Собери новую тренировку на локальном кэше без backend",
+    trainings: "История тренировок из JSON-фикстур и серверного хранилища",
+    progress: "Сводка по объему, лучшим упражнениям и сохраненным тренировкам",
+    new: state.currentUser?.is_default_debug_user
+      ? "Сохраним тренировку на backend под default browser user"
+      : "Сохраним тренировку на backend для текущего пользователя",
   };
 
-  const buildPills = `
-    <span class="pill">Local cache</span>
-    <span class="pill pill-build">Preview build</span>
-  `;
+  const buildPills = buildTopbarPills();
 
   let actionMarkup = `<div class="topbar-meta">${buildPills}</div>`;
   if (state.currentTab === "progress") {
@@ -778,7 +871,9 @@ function renderTopbar() {
     actionMarkup = `
       <div class="topbar-meta">
         ${buildPills}
-        <button class="action-button" data-action="finish-workout">Закончить тренировку</button>
+        <button class="action-button" data-action="finish-workout" ${
+          state.isSavingWorkout ? "disabled" : ""
+        }>${state.isSavingWorkout ? "Сохраняю..." : "Закончить тренировку"}</button>
       </div>
     `;
   }
@@ -1176,10 +1271,22 @@ function renderEmptyState(title) {
     <div class="empty-state">
       <div class="stack" style="justify-items:center;">
         <h2 class="topbar-title">${escapeHtml(title)}</h2>
-        <p class="muted-note">Когда ты добавишь первую тренировку в локальном режиме, она появится здесь.</p>
+        <p class="muted-note">Когда ты добавишь первую тренировку, она сохранится на сервере и появится здесь.</p>
       </div>
     </div>
   `;
+}
+
+function buildTopbarPills() {
+  const pills = ['<span class="pill">Server sync</span>'];
+
+  if (state.currentUser?.is_default_debug_user) {
+    pills.push('<span class="pill pill-build">Default browser user</span>');
+  } else if (state.currentUser?.auth_source === "telegram") {
+    pills.push('<span class="pill pill-build">Telegram user</span>');
+  }
+
+  return pills.join("");
 }
 
 function showFlash(message) {

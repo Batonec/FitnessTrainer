@@ -314,6 +314,15 @@ button {
   transform: translateY(-1px);
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.icon-button:disabled,
+.action-button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .primary-button {
   display: inline-flex;
   align-items: center;

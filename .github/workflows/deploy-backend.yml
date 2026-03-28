@@ -1,0 +1,101 @@
+name: Deploy Mini App Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "telegram_miniapp/server.py"
+      - "telegram_miniapp/backend_store.py"
+      - "telegram_miniapp/deploy/trainer-miniapp-backend.service"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-miniapp-backend-production
+  cancel-in-progress: true
+
+jobs:
+  deploy-backend:
+    name: Deploy backend to VPS
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_BASE: /opt/trainer-miniapp
+      BACKEND_SERVICE: trainer-miniapp-backend.service
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Check required secrets
+        id: secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -eu
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::notice title=Deploy skipped::$name is not configured in GitHub secrets"
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -eu
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Test SSH connection
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "whoami && hostname"
+
+      - name: Upload backend files
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "mkdir -p '$DEPLOY_BASE/app'"
+          scp -P "${VPS_PORT:-22}" \
+            telegram_miniapp/server.py \
+            telegram_miniapp/backend_store.py \
+            "$VPS_USER@$VPS_HOST:$DEPLOY_BASE/app/"
+          scp -P "${VPS_PORT:-22}" \
+            telegram_miniapp/deploy/trainer-miniapp-backend.service \
+            "$VPS_USER@$VPS_HOST:/etc/systemd/system/$BACKEND_SERVICE"
+
+      - name: Restart backend service
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "\
+            chmod 644 '$DEPLOY_BASE/app/server.py' '$DEPLOY_BASE/app/backend_store.py' '/etc/systemd/system/$BACKEND_SERVICE' && \
+            test -f /etc/trainer-miniapp/backend.env && \
+            systemctl daemon-reload && \
+            systemctl enable --now '$BACKEND_SERVICE' && \
+            systemctl restart '$BACKEND_SERVICE' && \
+            systemctl is-active '$BACKEND_SERVICE'"

@@ -4,14 +4,20 @@
 }
 
 trainer.89.124.83.32.nip.io {
-	root * /srv
-	encode zstd gzip
-
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 	}
 
-	try_files {path} /index.html
-	file_server
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy host.docker.internal:8081
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }

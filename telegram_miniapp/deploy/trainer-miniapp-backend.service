@@ -1,0 +1,16 @@
+[Unit]
+Description=Trainer Telegram Mini App Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/trainer-miniapp/app
+EnvironmentFile=/etc/trainer-miniapp/backend.env
+ExecStart=/usr/bin/python3 /opt/trainer-miniapp/app/server.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
