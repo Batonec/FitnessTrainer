@@ -127,6 +127,41 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 TRAINER_VPS_HOST=root@1.2.3.4 ./telegram_miniapp/deploy/deploy.sh web
 ```
 
+## GitHub Actions автодеплой
+
+В репозитории есть два workflow:
+
+- `.github/workflows/deploy-web.yml`
+- `.github/workflows/deploy-bot.yml`
+
+Они деплоят проект на существующий VPS по SSH.
+
+### Что нужно добавить в GitHub Secrets
+
+- `VPS_HOST` — IP или hostname сервера
+- `VPS_USER` — SSH-пользователь, для текущей конфигурации это `root`
+- `VPS_SSH_KEY` — приватный SSH-ключ, которым GitHub Actions сможет зайти на VPS
+- `VPS_PORT` — опционально, если SSH работает не на `22`
+
+Лучше использовать отдельный deploy-ключ, а не основной пользовательский ключ от ноутбука.
+
+Публичную часть этого ключа нужно добавить на VPS в `~/.ssh/authorized_keys` для того пользователя, под которым будет выполняться деплой.
+
+Secrets добавляются в:
+
+- `GitHub repository -> Settings -> Secrets and variables -> Actions`
+
+### Какой workflow за что отвечает
+
+- `deploy-web.yml` — автоматически синкает `telegram_miniapp/web/` в `/opt/trainer-miniapp/www`
+- `deploy-bot.yml` — загружает `telegram_miniapp/bot.py`, обновляет systemd unit и перезапускает `trainer-miniapp-bot.service`
+
+### Что важно
+
+- workflow для бота предполагает, что на VPS уже существует `/etc/trainer-miniapp/bot.env`
+- workflow для бота рассчитан на пользователя с правами на запись в `/etc/systemd/system` и на `systemctl`
+- оба workflow используют `environment: production`, так что при желании можно потом добавить manual approval в GitHub Environments
+
 ## Что проверить внутри Mini App
 
 На основном приложении ты увидишь:

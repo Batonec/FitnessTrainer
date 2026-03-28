@@ -1,0 +1,90 @@
+name: Deploy Telegram Bot
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "telegram_miniapp/bot.py"
+      - "telegram_miniapp/deploy/trainer-miniapp-bot.service"
+      - ".github/workflows/deploy-bot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-miniapp-bot-production
+  cancel-in-progress: true
+
+jobs:
+  deploy-bot:
+    name: Deploy bot to VPS
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_BASE: /opt/trainer-miniapp
+      BOT_SERVICE: trainer-miniapp-bot.service
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check required secrets
+        id: secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -eu
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::notice title=Deploy skipped::$name is not configured in GitHub secrets"
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -eu
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload bot files
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "mkdir -p '$DEPLOY_BASE/bot'"
+          scp -P "${VPS_PORT:-22}" \
+            telegram_miniapp/bot.py \
+            "$VPS_USER@$VPS_HOST:$DEPLOY_BASE/bot/bot.py"
+          scp -P "${VPS_PORT:-22}" \
+            telegram_miniapp/deploy/trainer-miniapp-bot.service \
+            "$VPS_USER@$VPS_HOST:/etc/systemd/system/$BOT_SERVICE"
+
+      - name: Restart bot service
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "\
+            chmod 644 '$DEPLOY_BASE/bot/bot.py' '/etc/systemd/system/$BOT_SERVICE' && \
+            test -f /etc/trainer-miniapp/bot.env && \
+            systemctl daemon-reload && \
+            systemctl enable --now '$BOT_SERVICE' && \
+            systemctl restart '$BOT_SERVICE' && \
+            systemctl is-active '$BOT_SERVICE'"

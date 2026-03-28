@@ -10,6 +10,7 @@
 - [Технический README по запуску и деплою](./telegram_miniapp/README.md)
 - [Frontend Mini App](./telegram_miniapp/web)
 - [Telegram-бот](./telegram_miniapp/bot.py)
+- [GitHub Actions workflows](./.github/workflows)
 - [Скрипт деплоя на VPS](./telegram_miniapp/deploy/deploy.sh)
 
 ## Что уже работает
@@ -21,6 +22,7 @@
 - работа на локальных JSON-фикстурах и `localStorage`;
 - локальный dev-режим с автообновлением;
 - деплой web-части и бота на VPS.
+- GitHub Actions автодеплой на VPS по SSH.
 
 ## Бизнес-логика в двух словах
 
@@ -69,3 +71,17 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 Полное описание запуска, переменных окружения и деплоя лежит в:
 
 - [telegram_miniapp/README.md](./telegram_miniapp/README.md)
+
+## GitHub Actions
+
+В репозитории настроены два workflow:
+
+- [deploy-web.yml](./.github/workflows/deploy-web.yml) — автодеплой `telegram_miniapp/web/**` на VPS при пуше в `main`
+- [deploy-bot.yml](./.github/workflows/deploy-bot.yml) — деплой `bot.py` и systemd unit на VPS при изменении бота
+
+Чтобы они заработали в GitHub, в secrets репозитория нужно добавить:
+
+- `VPS_HOST`
+- `VPS_USER`
+- `VPS_SSH_KEY`
+- `VPS_PORT` — опционально, если SSH не на `22`
