@@ -1,0 +1,17 @@
+{
+	http_port 80
+	https_port 8443
+}
+
+trainer.89.124.83.32.nip.io {
+	root * /srv
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	try_files {path} /index.html
+	file_server
+}

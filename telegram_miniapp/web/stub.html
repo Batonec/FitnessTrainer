@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
+    <title>Trainer Mini App Stub</title>
+    <script src="https://telegram.org/js/telegram-web-app.js?61"></script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-kicker">Trainer</div>
+        <h1>Telegram Mini App Stub</h1>
+        <p class="hero-copy">
+          Первая проверка интеграции: бот открывает веб-интерфейс, Telegram передает
+          `initData`, сервер валидирует подпись, а Mini App может ответить обратно в бот.
+        </p>
+      </header>
+
+      <section class="panel status-panel">
+        <div class="status-row">
+          <div>
+            <div class="eyebrow">Launch status</div>
+            <div id="launch-state" class="status-badge muted">Waiting</div>
+          </div>
+          <div>
+            <div class="eyebrow">Server auth</div>
+            <div id="auth-state" class="status-badge muted">Unknown</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="validate-button" class="primary-button" type="button">
+            Validate initData
+          </button>
+          <button id="send-data-button" class="ghost-button" type="button">
+            Send ping to bot
+          </button>
+          <button id="expand-button" class="ghost-button" type="button">
+            Expand Mini App
+          </button>
+        </div>
+
+        <p id="status-message" class="helper-text">
+          Открой страницу из Telegram, чтобы увидеть реальный `initData`.
+        </p>
+      </section>
+
+      <section id="manual-section" class="panel hidden">
+        <div class="panel-title">Manual initData check</div>
+        <p class="panel-copy">
+          Если страница открыта вне Telegram, сюда можно вставить `initData` вручную и проверить
+          серверную валидацию.
+        </p>
+        <textarea
+          id="manual-init-data"
+          rows="5"
+          placeholder="query_id=...&user=...&auth_date=...&hash=..."
+        ></textarea>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title">Client context</div>
+          <dl class="facts">
+            <div class="fact">
+              <dt>Platform</dt>
+              <dd id="platform-value">-</dd>
+            </div>
+            <div class="fact">
+              <dt>Version</dt>
+              <dd id="version-value">-</dd>
+            </div>
+            <div class="fact">
+              <dt>Color scheme</dt>
+              <dd id="scheme-value">-</dd>
+            </div>
+            <div class="fact">
+              <dt>Start param</dt>
+              <dd id="start-param-value">-</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">Telegram user</div>
+          <pre id="user-json" class="json-block">No Telegram user yet.</pre>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title">Validated payload</div>
+          <pre id="server-json" class="json-block">Validation has not run yet.</pre>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">Raw initData</div>
+          <pre id="init-data-preview" class="json-block">No initData yet.</pre>
+        </article>
+      </section>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
