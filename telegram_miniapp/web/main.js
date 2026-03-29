@@ -1761,10 +1761,29 @@ function render() {
     root.innerHTML = `
       <div class="layout">
         <main class="screen loading-state">
-          <div>
-            <div class="loader"></div>
-            <p class="muted-note">Подключаю пользователя и загружаю серверные тренировки...</p>
-          </div>
+          <section class="loading-shell" aria-live="polite" aria-busy="true">
+            <div class="loading-hero">
+              <div class="loading-kicker">Trainer</div>
+              <div class="loading-visual" aria-hidden="true">
+                <div class="loading-aura loading-aura-left"></div>
+                <div class="loading-aura loading-aura-right"></div>
+                <div class="loading-barbell">
+                  <span class="loading-plate loading-plate-left-outer"></span>
+                  <span class="loading-plate loading-plate-left-inner"></span>
+                  <span class="loading-bar"></span>
+                  <span class="loading-plate loading-plate-right-inner"></span>
+                  <span class="loading-plate loading-plate-right-outer"></span>
+                </div>
+                <div class="loading-floor"></div>
+              </div>
+              <div class="loading-copy-block">
+                <h1 class="loading-title">Собираю тренировочный зал</h1>
+                <p class="loading-copy">
+                  Подключаю пользователя, подтягиваю историю тренировок и готовлю экран к работе.
+                </p>
+              </div>
+            </div>
+          </section>
         </main>
       </div>
     `;
