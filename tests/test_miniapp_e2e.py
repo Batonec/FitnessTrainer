@@ -16,10 +16,28 @@ except ImportError:
 
 
 TELEGRAM_STUB_SCRIPT = """
+window.__telegramCalls = [];
 window.Telegram = {
   WebApp: {
-    ready() {},
-    expand() {},
+    isFullscreen: false,
+    isVerticalSwipesEnabled: true,
+    ready() {
+      window.__telegramCalls.push("ready");
+    },
+    expand() {
+      window.__telegramCalls.push("expand");
+    },
+    disableVerticalSwipes() {
+      window.__telegramCalls.push("disableVerticalSwipes");
+      this.isVerticalSwipesEnabled = false;
+    },
+    requestFullscreen() {
+      window.__telegramCalls.push("requestFullscreen");
+      this.isFullscreen = true;
+    },
+    onEvent(name) {
+      window.__telegramCalls.push(`onEvent:${name}`);
+    },
     BackButton: {
       show() {},
       hide() {},
@@ -241,6 +259,18 @@ class MiniAppE2ETest(unittest.TestCase):
         self.reveal_workout_actions(target_card)
         expect(target_card.locator('[data-action="edit-workout"]')).to_be_visible()
         expect(target_card.locator('[data-action="delete-workout"]')).to_be_visible()
+
+    def test_telegram_shell_requests_fullscreen_and_disables_vertical_swipes(self) -> None:
+        self.open_app()
+
+        calls = self.page.evaluate("window.__telegramCalls")
+        self.assertIn("ready", calls)
+        self.assertIn("expand", calls)
+        self.assertIn("disableVerticalSwipes", calls)
+        self.assertIn("requestFullscreen", calls)
+        self.assertIn("onEvent:activated", calls)
+        self.assertTrue(self.page.evaluate("window.Telegram.WebApp.isFullscreen"))
+        self.assertFalse(self.page.evaluate("window.Telegram.WebApp.isVerticalSwipesEnabled"))
 
     def test_open_swipe_card_can_be_closed_by_swiping_right(self) -> None:
         self.seed_single_workout(

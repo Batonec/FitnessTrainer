@@ -111,7 +111,29 @@ function setupTelegramShell() {
 
   tg.ready();
   tg.expand();
+  requestTelegramImmersiveMode();
   tg.BackButton?.onClick(handleTelegramBackRequest);
+  tg.onEvent?.("activated", requestTelegramImmersiveMode);
+}
+
+function requestTelegramImmersiveMode() {
+  if (!tg) {
+    return;
+  }
+
+  try {
+    tg.disableVerticalSwipes?.();
+  } catch (_error) {
+    // Some clients can ignore unsupported shell methods.
+  }
+
+  try {
+    if (typeof tg.requestFullscreen === "function" && tg.isFullscreen !== true) {
+      tg.requestFullscreen();
+    }
+  } catch (_error) {
+    // Older Telegram clients may not support fullscreen requests.
+  }
 }
 
 function sleep(ms) {
