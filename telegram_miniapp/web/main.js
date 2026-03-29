@@ -20,7 +20,14 @@ const TELEGRAM_INITDATA_POLL_MS = 120;
 const state = {
   booting: true,
   loadError: null,
-  currentTab: readTextStorage(STORAGE_KEYS.tab, "new"),
+  currentTab: readTextStorage(STORAGE_KEYS.tab, "trainings"),
+  newFlowOriginTab: "trainings",
+  scrollPositions: {
+    trainings: 0,
+    progress: 0,
+    new: 0,
+  },
+  pendingScrollRestoreTop: null,
   selectedRange: readTextStorage(STORAGE_KEYS.range, "DAYS_30"),
   selectedProgressExerciseId: readNumberStorage(STORAGE_KEYS.progressExercise, null),
   currentUser: null,
@@ -42,9 +49,11 @@ const state = {
 
 let flashTimeoutId = null;
 let devVersion = null;
+let hasOpenNewHistoryEntry = false;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
+window.addEventListener("popstate", handlePopState);
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.isAddingSet) {
     cancelAddingSet();
@@ -56,6 +65,8 @@ bootstrap();
 async function bootstrap() {
   setupTelegramShell();
   hydrateDraft();
+  normalizeCurrentTab();
+  syncBrowserHistory("replace");
   startLiveReload();
   render();
 
@@ -91,6 +102,7 @@ function setupTelegramShell() {
 
   tg.ready();
   tg.expand();
+  tg.BackButton?.onClick(handleTelegramBackRequest);
 }
 
 function sleep(ms) {
@@ -242,7 +254,17 @@ function handleClick(event) {
   const { action } = actionTarget.dataset;
   switch (action) {
     case "switch-tab":
-      setCurrentTab(actionTarget.dataset.tab);
+      if (actionTarget.dataset.tab === state.currentTab) {
+        scrollCurrentTabToTop();
+      } else {
+        setCurrentTab(actionTarget.dataset.tab);
+      }
+      break;
+    case "open-new-workout":
+      openNewWorkout();
+      break;
+    case "close-new-workout":
+      closeNewWorkout();
       break;
     case "select-range":
       selectRange(actionTarget.dataset.range);
@@ -253,9 +275,27 @@ function handleClick(event) {
     case "reset-workout-draft":
       {
         const wasEditingWorkout = Boolean(state.editingWorkoutId);
+        const returnTab = getNewFlowReturnTab();
+        const shouldUseHistoryBack = hasOpenNewHistoryEntry;
         resetDraftState();
-        showFlash(wasEditingWorkout ? "Редактирование отменено" : "Черновик тренировки очищен");
-        render();
+        if (wasEditingWorkout) {
+          if (shouldUseHistoryBack) {
+            state.currentTab = returnTab;
+            writeTextStorage(STORAGE_KEYS.tab, returnTab);
+            queueScrollRestore(returnTab);
+            window.history.back();
+          } else {
+            state.currentTab = returnTab;
+            writeTextStorage(STORAGE_KEYS.tab, returnTab);
+            queueScrollRestore(returnTab);
+            syncBrowserHistory("replace");
+            render();
+          }
+          showFlash("Редактирование отменено");
+        } else {
+          showFlash("Черновик тренировки очищен");
+          render();
+        }
       }
       break;
     case "edit-workout":
@@ -354,10 +394,69 @@ function setCurrentTab(tab) {
     return;
   }
 
+  captureScrollPosition(state.currentTab);
   state.currentTab = tab;
   writeTextStorage(STORAGE_KEYS.tab, tab);
   ensureNewWorkoutFlow();
+  queueScrollRestore(tab);
+  syncBrowserHistory("replace");
   render();
+}
+
+function normalizeNavTab(tab) {
+  return tab === "progress" ? "progress" : "trainings";
+}
+
+function normalizeScrollTab(tab) {
+  return tab === "progress" || tab === "new" ? tab : "trainings";
+}
+
+function normalizeCurrentTab() {
+  if (state.currentTab !== "new") {
+    state.newFlowOriginTab = normalizeNavTab(state.currentTab);
+    return;
+  }
+
+  if (hasWorkoutDraft() || state.editingWorkoutId) {
+    return;
+  }
+
+  state.currentTab = "trainings";
+  writeTextStorage(STORAGE_KEYS.tab, "trainings");
+}
+
+function rememberNewFlowOrigin(tab = state.currentTab) {
+  if (tab === "new") {
+    return;
+  }
+
+  state.newFlowOriginTab = normalizeNavTab(tab);
+}
+
+function getNewFlowReturnTab() {
+  return normalizeNavTab(state.newFlowOriginTab);
+}
+
+function openNewWorkout() {
+  rememberNewFlowOrigin();
+  captureScrollPosition(state.currentTab);
+  state.currentTab = "new";
+  writeTextStorage(STORAGE_KEYS.tab, "new");
+  ensureNewWorkoutFlow();
+  queueScrollRestore("new", 0);
+  pushNewFlowHistoryEntry();
+  render();
+}
+
+function closeNewWorkout() {
+  const returnTab = getNewFlowReturnTab();
+  if (hasOpenNewHistoryEntry) {
+    queueScrollRestore(returnTab);
+    window.history.back();
+    return;
+  }
+
+  setCurrentTab(returnTab);
 }
 
 function selectRange(rangeKey) {
@@ -619,6 +718,8 @@ function startEditingWorkout(workoutId) {
     return;
   }
 
+  rememberNewFlowOrigin();
+  captureScrollPosition(state.currentTab);
   state.currentTab = "new";
   state.workoutDate = workout.workout_date;
   state.selectedExerciseId = null;
@@ -642,6 +743,8 @@ function startEditingWorkout(workoutId) {
   state.isAddingExercise = false;
   writeTextStorage(STORAGE_KEYS.tab, "new");
   persistDraft();
+  queueScrollRestore("new", 0);
+  pushNewFlowHistoryEntry();
   render();
   showFlash("Тренировка открыта для редактирования");
 }
@@ -886,6 +989,8 @@ async function finishWorkout() {
 
   try {
     const editingWorkoutId = state.editingWorkoutId;
+    const returnTab = getNewFlowReturnTab();
+    const shouldUseHistoryBack = hasOpenNewHistoryEntry;
     const payload = editingWorkoutId
       ? await putJson(`/api/workouts/${editingWorkoutId}`, buildLocalWorkout())
       : await postJson("/api/workouts", buildLocalWorkout());
@@ -896,9 +1001,19 @@ async function finishWorkout() {
     ]);
     ensureSelectedProgressExercise();
     resetDraftState();
+    if (shouldUseHistoryBack) {
+      state.currentTab = returnTab;
+      writeTextStorage(STORAGE_KEYS.tab, returnTab);
+      queueScrollRestore(returnTab, editingWorkoutId ? null : 0);
+      hasOpenNewHistoryEntry = false;
+      window.history.back();
+    } else {
+      state.currentTab = returnTab;
+      writeTextStorage(STORAGE_KEYS.tab, returnTab);
+      queueScrollRestore(returnTab, editingWorkoutId ? null : 0);
+      syncBrowserHistory("replace");
+    }
     if (editingWorkoutId) {
-      state.currentTab = "trainings";
-      writeTextStorage(STORAGE_KEYS.tab, "trainings");
       showFlash("Изменения в тренировке сохранены");
     } else {
       showFlash(
@@ -921,6 +1036,8 @@ function resetDraftState() {
   state.workoutExercises = [];
   state.editingWorkoutId = null;
   state.editingWorkoutClientId = null;
+  state.newFlowOriginTab = "trainings";
+  hasOpenNewHistoryEntry = false;
   state.activeSetEditor = null;
   state.isAddingExercise = state.exercises.length > 0;
   state.isAddingSet = false;
@@ -1227,6 +1344,134 @@ async function migrateLegacyCustomWorkouts() {
   showFlash("Старые локальные тренировки перенесены на сервер");
 }
 
+function getScrollTop() {
+  return Math.max(
+    0,
+    window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0
+  );
+}
+
+function captureScrollPosition(tab = state.currentTab) {
+  state.scrollPositions[normalizeScrollTab(tab)] = getScrollTop();
+}
+
+function scrollCurrentTabToTop() {
+  const tab = normalizeScrollTab(state.currentTab);
+  state.scrollPositions[tab] = 0;
+  state.pendingScrollRestoreTop = null;
+
+  const behavior = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+    ? "auto"
+    : "smooth";
+  window.scrollTo({
+    top: 0,
+    behavior,
+  });
+}
+
+function queueScrollRestore(tab, top = null) {
+  const restoredTop =
+    top == null
+      ? state.scrollPositions[normalizeScrollTab(tab)] || 0
+      : Math.max(0, Number(top) || 0);
+  state.pendingScrollRestoreTop = restoredTop;
+}
+
+function flushPendingScrollRestore() {
+  if (state.pendingScrollRestoreTop == null) {
+    return;
+  }
+
+  const top = state.pendingScrollRestoreTop;
+  state.pendingScrollRestoreTop = null;
+  window.requestAnimationFrame(() => {
+    window.scrollTo(0, top);
+  });
+}
+
+function syncBrowserHistory(mode = "replace") {
+  if (!window.history?.replaceState) {
+    return;
+  }
+
+  const historyState = {
+    trainerMiniAppNav: true,
+    trainerMiniAppTab: state.currentTab,
+    trainerMiniAppOriginTab: state.newFlowOriginTab,
+  };
+
+  try {
+    if (mode === "push" && window.history.pushState) {
+      window.history.pushState(historyState, "");
+    } else {
+      window.history.replaceState(historyState, "");
+    }
+  } catch (_error) {
+    // Some webviews can reject history mutations. Safe to ignore.
+  }
+}
+
+function pushNewFlowHistoryEntry() {
+  hasOpenNewHistoryEntry = true;
+  syncBrowserHistory("push");
+}
+
+function restoreTabFromHistory(tab, options = {}) {
+  const nextTab = tab === "new" ? "new" : normalizeNavTab(tab);
+  if (options.captureCurrent !== false && nextTab !== state.currentTab) {
+    captureScrollPosition(state.currentTab);
+  }
+
+  state.currentTab = nextTab;
+  writeTextStorage(STORAGE_KEYS.tab, nextTab);
+  ensureNewWorkoutFlow();
+  queueScrollRestore(nextTab, options.top ?? null);
+  render();
+}
+
+function handlePopState(event) {
+  const historyState = event.state;
+
+  if (!historyState?.trainerMiniAppNav) {
+    if (state.currentTab === "new" && hasOpenNewHistoryEntry) {
+      hasOpenNewHistoryEntry = false;
+      restoreTabFromHistory(getNewFlowReturnTab(), { captureCurrent: false });
+    }
+    return;
+  }
+
+  if (historyState.trainerMiniAppTab === "new") {
+    state.newFlowOriginTab = normalizeNavTab(historyState.trainerMiniAppOriginTab);
+    hasOpenNewHistoryEntry = true;
+    restoreTabFromHistory("new", { top: 0 });
+    return;
+  }
+
+  if (state.currentTab === "new") {
+    hasOpenNewHistoryEntry = false;
+  }
+  state.newFlowOriginTab = normalizeNavTab(historyState.trainerMiniAppTab);
+  restoreTabFromHistory(historyState.trainerMiniAppTab, { captureCurrent: false });
+}
+
+function updateTelegramBackButton() {
+  if (!tg?.BackButton) {
+    return;
+  }
+
+  if (state.currentTab === "new" && !state.booting && !state.loadError) {
+    tg.BackButton.show();
+  } else {
+    tg.BackButton.hide();
+  }
+}
+
+function handleTelegramBackRequest() {
+  if (state.currentTab === "new") {
+    closeNewWorkout();
+  }
+}
+
 function render() {
   if (state.booting) {
     root.innerHTML = `
@@ -1239,6 +1484,8 @@ function render() {
         </main>
       </div>
     `;
+    updateTelegramBackButton();
+    flushPendingScrollRestore();
     return;
   }
 
@@ -1254,12 +1501,15 @@ function render() {
         </main>
       </div>
     `;
+    updateTelegramBackButton();
+    flushPendingScrollRestore();
     return;
   }
 
   const topbar = renderTopbar();
   const screen = renderCurrentScreen();
   const nav = renderBottomNav();
+  const fab = renderFloatingActionButton();
   const modal = state.isAddingSet ? renderSetModal() : "";
   const toast = state.flashMessage ? `<div class="toast">${escapeHtml(state.flashMessage)}</div>` : "";
 
@@ -1269,11 +1519,14 @@ function render() {
       <main class="screen">
         ${screen}
       </main>
+      ${fab}
       ${toast}
       ${nav}
       ${modal}
     </div>
   `;
+  updateTelegramBackButton();
+  flushPendingScrollRestore();
 }
 
 function renderTopbar() {
@@ -1283,55 +1536,39 @@ function renderTopbar() {
     new: state.editingWorkoutId ? "Редактирование" : "Новая тренировка",
   };
 
-  const subtitles = {
-    trainings: "История тренировок из серверного хранилища",
-    progress: "Рост веса и повторений по выбранному упражнению",
-    new: state.editingWorkoutId
-      ? `Обновим тренировку от ${formatLongDate(state.workoutDate)} и сохраним её для текущего пользователя`
-      : state.currentUser?.is_default_debug_user
-        ? "Сохраним тренировку на backend под default browser user"
-        : "Сохраним тренировку на backend для текущего пользователя",
-  };
-
   const buildPills = buildTopbarPills();
-
-  let actionMarkup = `<div class="topbar-meta">${buildPills}</div>`;
+  let actionMarkup = "";
   if (state.currentTab === "progress") {
     actionMarkup = `
-      <div class="topbar-meta">
-        ${buildPills}
-        <button class="secondary-button topbar-refresh-button" data-action="refresh-progress">
-          Обновить
-        </button>
-      </div>
+      <button class="secondary-button topbar-utility-button" data-action="refresh-progress">
+        Обновить
+      </button>
     `;
   }
 
-  if (state.currentTab === "new" && state.workoutExercises.length > 0) {
+  if (state.currentTab === "new") {
     actionMarkup = `
-      <div class="topbar-meta">
-        ${buildPills}
-        <button class="action-button" data-action="finish-workout" ${
-          state.isSavingWorkout ? "disabled" : ""
-        }>${
-          state.isSavingWorkout
-            ? "Сохраняю..."
-            : state.editingWorkoutId
-              ? "Сохранить изменения"
-              : "Закончить тренировку"
-        }</button>
+      <div class="topbar-action-group">
+        <button class="secondary-button topbar-utility-button" data-action="close-new-workout">
+          Назад
+        </button>
+        ${
+          state.workoutExercises.length > 0
+            ? `<button class="action-button topbar-primary-action" data-action="finish-workout" ${
+                state.isSavingWorkout ? "disabled" : ""
+              }>${state.isSavingWorkout ? "Сохраняю..." : "Сохранить"}</button>`
+            : ""
+        }
       </div>
     `;
   }
 
   return `
-    <header class="topbar">
-      <div class="topbar-row">
-        <div>
-          <h1 class="topbar-title">${escapeHtml(titles[state.currentTab])}</h1>
-          <div class="topbar-subtitle">${escapeHtml(subtitles[state.currentTab])}</div>
-        </div>
-        ${actionMarkup}
+    <header class="topbar topbar-compact">
+      <h1 class="sr-only topbar-title">${escapeHtml(titles[state.currentTab])}</h1>
+      <div class="topbar-row topbar-row-compact">
+        <div class="topbar-meta topbar-meta-compact">${buildPills}</div>
+        ${actionMarkup ? `<div class="topbar-actions">${actionMarkup}</div>` : ""}
       </div>
     </header>
   `;
@@ -1969,7 +2206,6 @@ function renderSetModal() {
 function renderBottomNav() {
   const items = [
     { key: "trainings", label: "Trainings", icon: "trainings" },
-    { key: "new", label: "New", icon: "new" },
     { key: "progress", label: "Progress", icon: "progress" },
   ];
 
@@ -1992,6 +2228,18 @@ function renderBottomNav() {
           .join("")}
       </nav>
     </div>
+  `;
+}
+
+function renderFloatingActionButton() {
+  if (state.currentTab !== "trainings") {
+    return "";
+  }
+
+  return `
+    <button class="floating-action-button" data-action="open-new-workout" aria-label="Новая тренировка">
+      ${iconMarkup("new")}
+    </button>
   `;
 }
 
@@ -2021,11 +2269,11 @@ function buildTopbarPills() {
   const pills = [];
 
   if (state.currentUser?.is_default_debug_user) {
-    pills.push('<span class="pill pill-build">Default browser user</span>');
+    pills.push('<span class="pill pill-build">Browser debug</span>');
   } else if (state.currentUser?.auth_source === "telegram") {
-    pills.push('<span class="pill pill-build">Telegram user</span>');
+    pills.push('<span class="pill pill-build">Telegram</span>');
   } else if (state.currentUser?.auth_source === "telegram_unsafe") {
-    pills.push('<span class="pill pill-build">Telegram fallback</span>');
+    pills.push('<span class="pill pill-build">TG fallback</span>');
   }
 
   if (Number.isFinite(state.currentUser?.id)) {

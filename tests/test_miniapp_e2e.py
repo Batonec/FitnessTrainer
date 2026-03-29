@@ -19,6 +19,12 @@ window.Telegram = {
   WebApp: {
     ready() {},
     expand() {},
+    BackButton: {
+      show() {},
+      hide() {},
+      onClick() {},
+      offClick() {}
+    },
     initData: "",
     initDataUnsafe: {}
   }
@@ -58,7 +64,11 @@ class MiniAppE2ETest(unittest.TestCase):
 
     def open_app(self) -> None:
         self.page.goto(self.app.base_url, wait_until="networkidle")
-        expect(self.page.locator(".topbar-title")).to_have_text("Новая тренировка")
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
+
+    def open_new_workout(self) -> None:
+        self.page.locator('[data-action="open-new-workout"]').click()
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Новая тренировка")
 
     def add_default_set(self) -> None:
         self.page.locator('[data-action="start-adding-set"]').click()
@@ -130,24 +140,37 @@ class MiniAppE2ETest(unittest.TestCase):
         )
         return response.payload["workout"]
 
+    def seed_workout_history(self, count: int = 12) -> None:
+        for index in range(count):
+            self.seed_single_workout(
+                client_id=f"history-seed-{index}",
+                workout_date=f"2026-03-{index + 1:02d}",
+                exercise_id=700 + index,
+                exercise_name=f"История {index + 1}",
+                weight=40.0 + index,
+                reps=10 + (index % 4),
+            )
+
     def test_can_create_two_same_day_workouts_and_latest_one_is_first(self) -> None:
         self.open_app()
+        self.open_new_workout()
 
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
         self.add_default_set()
         self.page.locator('[data-action="finish-workout"]').click()
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
+        self.open_new_workout()
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Тяга верт.").click()
         self.add_default_set()
         self.page.locator('[data-action="finish-workout"]').click()
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
-        self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
         expect(self.page.locator(".workout-card").first).to_contain_text("Тяга верт.")
 
     def test_restored_draft_can_be_reset_from_ui(self) -> None:
         self.open_app()
+        self.open_new_workout()
 
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.").click()
         self.add_default_set()
@@ -166,6 +189,59 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(
             self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
         ).to_be_visible()
+
+    def test_can_leave_new_workout_and_resume_saved_draft(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        self.add_default_set()
+        self.page.locator('[data-action="close-new-workout"]').click()
+
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
+        expect(self.page.locator('[data-action="open-new-workout"]')).to_be_visible()
+
+        self.open_new_workout()
+
+        expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+
+    def test_returning_from_new_restores_trainings_scroll_position(self) -> None:
+        self.seed_workout_history()
+        self.open_app()
+
+        self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        self.page.wait_for_timeout(150)
+        initial_scroll = self.page.evaluate("window.scrollY")
+        self.assertGreater(initial_scroll, 300)
+
+        self.open_new_workout()
+        self.page.locator('[data-action="close-new-workout"]').click()
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
+        self.page.wait_for_function(f"() => window.scrollY >= {max(0, int(initial_scroll) - 24)}")
+
+    def test_tapping_active_trainings_tab_scrolls_back_to_top(self) -> None:
+        self.seed_workout_history()
+        self.open_app()
+
+        self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        self.page.wait_for_timeout(150)
+        self.assertGreater(self.page.evaluate("window.scrollY"), 300)
+
+        self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
+        self.page.wait_for_function("() => window.scrollY <= 4")
+
+    def test_browser_back_closes_new_workout_and_keeps_draft(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        self.add_default_set()
+        self.page.go_back()
+
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
+        self.open_new_workout()
+        expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
 
     def test_progress_screen_shows_weight_and_rep_growth_for_selected_exercise(self) -> None:
         self.seed_progress_workouts()
