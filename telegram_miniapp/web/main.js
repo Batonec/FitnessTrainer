@@ -17,6 +17,11 @@ const PROGRESS_RANGES = [
 const TELEGRAM_INITDATA_WAIT_MS = 1800;
 const TELEGRAM_INITDATA_POLL_MS = 120;
 const WORKOUT_SWIPE_ACTIONS_WIDTH = 148;
+const WORKOUT_SWIPE_GESTURE_THRESHOLD = 8;
+const WORKOUT_SWIPE_HORIZONTAL_RATIO = 0.62;
+const WORKOUT_SWIPE_VERTICAL_RATIO = 1.12;
+const WORKOUT_SWIPE_EDGE_START_PX = 92;
+const WORKOUT_SWIPE_CLICK_GUARD_MS = 320;
 
 const state = {
   booting: true,
@@ -53,7 +58,7 @@ let flashTimeoutId = null;
 let devVersion = null;
 let hasOpenNewHistoryEntry = false;
 let workoutSwipeGesture = null;
-let suppressClickAfterSwipe = false;
+let swipeClickGuard = null;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
@@ -277,8 +282,8 @@ function getTelegramUnsafeUser() {
 }
 
 function handleClick(event) {
-  if (suppressClickAfterSwipe) {
-    suppressClickAfterSwipe = false;
+  if (shouldSuppressSwipeSurfaceClick(event)) {
+    clearSwipeClickGuard();
     event.preventDefault();
     event.stopPropagation();
     return;
@@ -1470,6 +1475,40 @@ function pushNewFlowHistoryEntry() {
   syncBrowserHistory("push");
 }
 
+function armSwipeClickGuard(workoutId) {
+  swipeClickGuard = {
+    workoutId,
+    expiresAt: Date.now() + WORKOUT_SWIPE_CLICK_GUARD_MS,
+  };
+}
+
+function clearSwipeClickGuard() {
+  swipeClickGuard = null;
+}
+
+function shouldSuppressSwipeSurfaceClick(event) {
+  if (!swipeClickGuard) {
+    return false;
+  }
+
+  if (Date.now() > swipeClickGuard.expiresAt) {
+    clearSwipeClickGuard();
+    return false;
+  }
+
+  const surface = event.target.closest("[data-workout-swipe-surface]");
+  if (!surface) {
+    return false;
+  }
+
+  const workoutId = Number(surface.dataset.workoutId);
+  if (!Number.isFinite(workoutId) || workoutId !== swipeClickGuard.workoutId) {
+    return false;
+  }
+
+  return true;
+}
+
 function closeWorkoutSwipe(renderAfter = true) {
   if (state.openWorkoutSwipeId == null) {
     return;
@@ -1501,6 +1540,9 @@ function handleWorkoutSwipePointerDown(event) {
       state.openWorkoutSwipeId != null &&
       !event.target.closest("[data-workout-swipe-actions]")
     ) {
+      if (event.target.closest("[data-action], button, a, input, select, textarea, label")) {
+        return;
+      }
       closeWorkoutSwipe();
     }
     return;
@@ -1528,6 +1570,16 @@ function handleWorkoutSwipePointerDown(event) {
     return;
   }
 
+  const isCurrentlyOpen = state.openWorkoutSwipeId === workoutId;
+  if (!isCurrentlyOpen) {
+    const rect = surface.getBoundingClientRect();
+    const edgeWidth = Math.min(WORKOUT_SWIPE_EDGE_START_PX, rect.width * 0.34);
+    const edgeStartX = rect.right - edgeWidth;
+    if (event.clientX < edgeStartX) {
+      return;
+    }
+  }
+
   if (state.openWorkoutSwipeId != null && state.openWorkoutSwipeId !== workoutId) {
     closeWorkoutSwipe();
     return;
@@ -1539,8 +1591,8 @@ function handleWorkoutSwipePointerDown(event) {
     surface,
     startX: event.clientX,
     startY: event.clientY,
-    baseOffset: state.openWorkoutSwipeId === workoutId ? -WORKOUT_SWIPE_ACTIONS_WIDTH : 0,
-    lastOffset: state.openWorkoutSwipeId === workoutId ? -WORKOUT_SWIPE_ACTIONS_WIDTH : 0,
+    baseOffset: isCurrentlyOpen ? -WORKOUT_SWIPE_ACTIONS_WIDTH : 0,
+    lastOffset: isCurrentlyOpen ? -WORKOUT_SWIPE_ACTIONS_WIDTH : 0,
     mode: "pending",
   };
 
@@ -1554,18 +1606,31 @@ function handleWorkoutSwipePointerMove(event) {
 
   const deltaX = event.clientX - workoutSwipeGesture.startX;
   const deltaY = event.clientY - workoutSwipeGesture.startY;
+  const absDeltaX = Math.abs(deltaX);
+  const absDeltaY = Math.abs(deltaY);
 
   if (workoutSwipeGesture.mode === "pending") {
-    if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
+    if (
+      absDeltaX < WORKOUT_SWIPE_GESTURE_THRESHOLD &&
+      absDeltaY < WORKOUT_SWIPE_GESTURE_THRESHOLD
+    ) {
       return;
     }
 
-    if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+    if (
+      absDeltaX >= WORKOUT_SWIPE_GESTURE_THRESHOLD &&
+      absDeltaX >= absDeltaY * WORKOUT_SWIPE_HORIZONTAL_RATIO
+    ) {
+      workoutSwipeGesture.mode = "swiping";
+    } else if (
+      absDeltaY >= WORKOUT_SWIPE_GESTURE_THRESHOLD &&
+      absDeltaY > absDeltaX * WORKOUT_SWIPE_VERTICAL_RATIO
+    ) {
       workoutSwipeGesture.mode = "scrolling";
       return;
+    } else {
+      return;
     }
-
-    workoutSwipeGesture.mode = "swiping";
   }
 
   if (workoutSwipeGesture.mode !== "swiping") {
@@ -1589,16 +1654,20 @@ function handleWorkoutSwipePointerUp(event) {
   const { surface, workoutId, mode, baseOffset } = workoutSwipeGesture;
   const deltaX = event.clientX - workoutSwipeGesture.startX;
   const deltaY = event.clientY - workoutSwipeGesture.startY;
+  const absDeltaX = Math.abs(deltaX);
+  const absDeltaY = Math.abs(deltaY);
   const finalOffset = Math.max(-WORKOUT_SWIPE_ACTIONS_WIDTH, Math.min(0, baseOffset + deltaX));
   const treatedAsSwipe =
-    mode === "swiping" || (Math.abs(deltaX) > 14 && Math.abs(deltaX) > Math.abs(deltaY));
+    mode === "swiping" ||
+    (absDeltaX >= WORKOUT_SWIPE_GESTURE_THRESHOLD &&
+      absDeltaX >= absDeltaY * WORKOUT_SWIPE_HORIZONTAL_RATIO);
   surface.releasePointerCapture?.(event.pointerId);
   workoutSwipeGesture = null;
 
   if (treatedAsSwipe) {
     const shouldOpen = finalOffset <= -WORKOUT_SWIPE_ACTIONS_WIDTH / 2;
     state.openWorkoutSwipeId = shouldOpen ? workoutId : null;
-    suppressClickAfterSwipe = true;
+    armSwipeClickGuard(workoutId);
     render();
     return;
   }
@@ -1818,6 +1887,7 @@ function renderTrainingsScreen() {
 function renderWorkoutCard(workout) {
   const badge = workout.data.load_type ? renderLoadBadge(workout.data.load_type) : "";
   const isSwipeOpen = state.openWorkoutSwipeId === workout.id;
+  const dateSummary = `${formatLongDate(workout.workout_date)}, ${formatWeekday(workout.workout_date)}`;
   return `
     <section
       class="workout-swipe-card ${isSwipeOpen ? "workout-swipe-card-open" : ""}"
@@ -1851,15 +1921,12 @@ function renderWorkoutCard(workout) {
         data-workout-id="${workout.id}"
       >
         <div class="workout-header">
-          <div>
-            <div class="workout-date">${escapeHtml(formatLongDate(workout.workout_date))}</div>
-            <div class="workout-day">${escapeHtml(formatWeekday(workout.workout_date))}</div>
-          </div>
+          <div class="workout-date-line">${escapeHtml(dateSummary)}</div>
           <div class="workout-header-side">
             ${badge}
           </div>
         </div>
-        <div class="stack">
+        <div class="workout-exercise-list">
           ${workout.data.exercises.map((exercise) => renderLoggedExerciseCard(exercise)).join("")}
         </div>
       </div>
@@ -1893,32 +1960,71 @@ function renderSwipeActionIcon(kind) {
 }
 
 function renderLoggedExerciseCard(exercise) {
-  const groupedSets = groupConsecutiveExerciseSets(exercise.sets);
+  const compactSets = summarizeExerciseSets(exercise.sets);
   return `
-    <article class="surface-card exercise-card">
-      <div class="exercise-name">${escapeHtml(exercise.name)}</div>
-      <div class="set-list">
-        ${groupedSets
-          .map(
-            (group) => `
-              <div class="set-row">
-                <span>${escapeHtml(
-                  group.count > 1
-                    ? `${formatWeight(group.weight)} кг × ${group.reps} × ${group.count}`
-                    : `${formatWeight(group.weight)} кг × ${group.reps}`
-                )}</span>
-                ${
-                  group.notes
-                    ? `<span class="set-notes">${escapeHtml(group.notes)}</span>`
-                    : ""
-                }
-              </div>
-            `
-          )
-          .join("")}
+    <article class="workout-exercise-row">
+      <div class="workout-exercise-inline">
+        <span class="workout-exercise-name">${escapeHtml(exercise.name)}</span>
+        <span class="workout-set-summary-inline">
+          ${compactSets.parts
+            .map(
+              (part) => `
+                <span class="workout-set-summary-part">${escapeHtml(part)}</span>
+              `
+            )
+            .join("")}
+        </span>
       </div>
+      ${
+        compactSets.notes.length
+          ? `<div class="set-notes-inline">${compactSets.notes
+              .map((note) => escapeHtml(note))
+              .join(" · ")}</div>`
+          : ""
+      }
     </article>
   `;
+}
+
+function summarizeExerciseSets(sets) {
+  if (!Array.isArray(sets) || !sets.length) {
+    return {
+      parts: ["Пока нет сетов"],
+      notes: [],
+    };
+  }
+
+  const grouped = [];
+  let current = null;
+
+  sets.forEach((set) => {
+    const weight = Number(set.weight) || 0;
+    const reps = Number(set.reps) || 0;
+    const note = typeof set.notes === "string" ? set.notes.trim() : "";
+
+    if (current && current.weight === weight) {
+      current.reps.push(reps);
+    } else {
+      if (current) {
+        grouped.push(current);
+      }
+      current = {
+        weight,
+        reps: [reps],
+      };
+    }
+  });
+
+  if (current) {
+    grouped.push(current);
+  }
+
+  return {
+    parts: grouped.map((group) => `${formatWeight(group.weight)} кг × ${group.reps.join(", ")}`),
+    notes: sets
+      .map((set) => (typeof set.notes === "string" ? set.notes.trim() : ""))
+      .filter(Boolean),
+  };
 }
 
 function renderProgressScreen() {

@@ -93,7 +93,7 @@ class MiniAppE2ETest(unittest.TestCase):
         self.page.locator('[data-action="start-adding-set"]').click()
         self.page.locator('[data-action="set-apply"]').click()
 
-    def reveal_workout_actions(self, card_locator) -> None:
+    def reveal_workout_actions(self, card_locator, *, vertical_shift: float = 0) -> None:
         surface = card_locator.locator('[data-workout-swipe-surface]').first
         surface.scroll_into_view_if_needed()
         box = surface.bounding_box()
@@ -101,10 +101,11 @@ class MiniAppE2ETest(unittest.TestCase):
         start_x = box["x"] + box["width"] - 18
         end_x = start_x - 150
         y = box["y"] + min(48, box["height"] / 2)
+        end_y = y + vertical_shift
 
         self.page.mouse.move(start_x, y)
         self.page.mouse.down()
-        self.page.mouse.move(end_x, y, steps=12)
+        self.page.mouse.move(end_x, end_y, steps=12)
         self.page.mouse.up()
         expect(surface).to_have_class(re.compile(r".*workout-card-surface-open.*"))
 
@@ -260,6 +261,21 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(target_card.locator('[data-action="edit-workout"]')).to_be_visible()
         expect(target_card.locator('[data-action="delete-workout"]')).to_be_visible()
 
+    def test_mild_diagonal_swipe_still_reveals_actions(self) -> None:
+        self.seed_single_workout(
+            client_id="swipe-diagonal-test",
+            workout_date="2026-03-29",
+            exercise_id=780,
+            exercise_name="Диагональный свайп",
+            weight=75.0,
+            reps=8,
+        )
+        self.open_app()
+
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Диагональный свайп")
+        self.reveal_workout_actions(target_card, vertical_shift=24)
+        expect(target_card.locator('[data-action="edit-workout"]')).to_be_visible()
+
     def test_telegram_shell_requests_fullscreen_and_disables_vertical_swipes(self) -> None:
         self.open_app()
 
@@ -399,6 +415,40 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
 
         expect(self.page.locator(".topbar-meta")).to_contain_text("UID 1")
+
+    def test_swipe_does_not_block_switch_to_progress_tab(self) -> None:
+        self.seed_single_workout(
+            client_id="swipe-tab-bug",
+            workout_date="2026-03-29",
+            exercise_id=781,
+            exercise_name="Тап по прогрессу",
+            weight=80.0,
+            reps=10,
+        )
+        self.open_app()
+
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Тап по прогрессу")
+        self.reveal_workout_actions(target_card)
+        self.page.locator('[data-action="switch-tab"][data-tab="progress"]').click()
+
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Progress")
+
+    def test_swipe_does_not_block_open_new_workout_button(self) -> None:
+        self.seed_single_workout(
+            client_id="swipe-fab-bug",
+            workout_date="2026-03-29",
+            exercise_id=782,
+            exercise_name="Тап по плюсу",
+            weight=82.5,
+            reps=9,
+        )
+        self.open_app()
+
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Тап по плюсу")
+        self.reveal_workout_actions(target_card)
+        self.page.locator('[data-action="open-new-workout"]').click()
+
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Новая тренировка")
 
     def test_can_edit_workout_from_history(self) -> None:
         self.seed_single_workout(
