@@ -131,6 +131,37 @@ button {
   gap: 16px;
 }
 
+.workout-header-side {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.workout-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.workout-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgba(17, 17, 17, 0.06);
+  color: var(--page-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workout-action-button-danger {
+  background: rgba(176, 74, 74, 0.12);
+  color: var(--danger-ink);
+}
+
 .workout-date {
   font-size: 22px;
   font-weight: 500;
@@ -491,6 +522,79 @@ button {
   margin-top: 12px;
 }
 
+.workout-meta-card {
+  padding: 16px;
+}
+
+.date-input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+  color: var(--page-ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.draft-exercise-head {
+  display: grid;
+  gap: 10px;
+}
+
+.draft-exercise-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.draft-inline-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgba(69, 98, 208, 0.12);
+  color: var(--success-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.draft-inline-button-danger {
+  background: rgba(176, 74, 74, 0.12);
+  color: var(--danger-ink);
+}
+
+.set-row-editable {
+  align-items: stretch;
+}
+
+.set-row-main {
+  flex: 1;
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  text-align: left;
+  padding: 0;
+}
+
+.set-row-index {
+  color: var(--page-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.set-row-remove-button {
+  align-self: center;
+  color: var(--danger-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .section-title {
   font-size: 18px;
   font-weight: 700;
@@ -684,6 +788,15 @@ button {
   font-weight: 700;
 }
 
+.modal-heading {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--page-muted);
+}
+
 .value-stepper {
   display: grid;
   grid-template-columns: 64px 1fr 64px;
@@ -867,6 +980,12 @@ button {
 
   .topbar-meta {
     width: 100%;
+    justify-content: flex-start;
+  }
+
+  .workout-header-side,
+  .workout-card-actions {
+    justify-items: start;
     justify-content: flex-start;
   }
 

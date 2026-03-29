@@ -207,6 +207,96 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(first_response.payload["workout"]["id"], second_response.payload["workout"]["id"])
             self.assertEqual(len(workouts_response.payload["workouts"]), 1)
 
+    def test_workouts_endpoint_updates_existing_workout_via_put(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            created_response = client.request_json(
+                "POST",
+                "/api/workouts",
+                sample_workout_payload(
+                    client_id="editable-api-workout",
+                    workout_date="2026-03-18",
+                    exercise_id=4,
+                    exercise_name="Pull Up",
+                    weight=10,
+                    reps=8,
+                ),
+            )
+
+            updated_response = client.request_json(
+                "PUT",
+                f"/api/workouts/{created_response.payload['workout']['id']}",
+                sample_workout_payload(
+                    client_id="ignored-client-id",
+                    workout_date="2026-03-27",
+                    exercise_id=4,
+                    exercise_name="Pull Up",
+                    weight=20,
+                    reps=10,
+                    notes=" Updated pull-up day ",
+                ),
+            )
+
+            workouts_response = client.request_json("GET", "/api/workouts")
+
+            self.assertEqual(updated_response.status, 200)
+            self.assertEqual(updated_response.payload["workout"]["client_id"], "editable-api-workout")
+            self.assertEqual(updated_response.payload["workout"]["workout_date"], "2026-03-27")
+            self.assertEqual(updated_response.payload["workout"]["data"]["notes"], "Updated pull-up day")
+            self.assertEqual(workouts_response.payload["workouts"][0]["data"]["exercises"][0]["sets"][0]["weight"], 20)
+
+    def test_workouts_endpoint_returns_not_found_for_missing_update(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            response = client.request_json(
+                "PUT",
+                "/api/workouts/9999",
+                sample_workout_payload(client_id="missing-update"),
+            )
+
+            self.assertEqual(response.status, 404)
+            self.assertIn("Workout not found", response.payload["reason"])
+
+    def test_workouts_endpoint_deletes_existing_workout_via_delete(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            created_response = client.request_json(
+                "POST",
+                "/api/workouts",
+                sample_workout_payload(
+                    client_id="delete-api-workout",
+                    exercise_id=6,
+                    exercise_name="Squat",
+                ),
+            )
+
+            delete_response = client.request_json(
+                "DELETE",
+                f"/api/workouts/{created_response.payload['workout']['id']}",
+            )
+            workouts_response = client.request_json("GET", "/api/workouts")
+
+            self.assertEqual(delete_response.status, 200)
+            self.assertTrue(delete_response.payload["deleted"])
+            self.assertEqual(delete_response.payload["workout"]["id"], created_response.payload["workout"]["id"])
+            self.assertEqual(workouts_response.payload["workouts"], [])
+
+    def test_workouts_endpoint_returns_not_found_for_missing_delete(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            response = client.request_json("DELETE", "/api/workouts/9999")
+
+            self.assertEqual(response.status, 404)
+            self.assertIn("Workout not found", response.payload["reason"])
+
     def test_telegram_auth_endpoint_reports_empty_initdata(self) -> None:
         with running_miniapp_server(allow_debug_user=False) as app:
             client = JsonHttpClient(app.base_url)

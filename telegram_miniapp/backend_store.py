@@ -303,6 +303,11 @@ class MiniAppStore:
             ).fetchall()
         return [self._deserialize_workout(row) for row in rows]
 
+    def get_workout_by_id(self, user_id: int, workout_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = self._get_workout_row(connection, user_id, workout_id)
+        return self._deserialize_workout(row) if row is not None else None
+
     def save_workout(self, user_id: int, payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         normalized_payload, client_id = normalize_workout_payload(payload)
         timestamp = utc_now()
@@ -355,10 +360,76 @@ class MiniAppStore:
             raise RuntimeError("Failed to persist workout")
         return self._deserialize_workout(row), True
 
+    def update_workout(
+        self,
+        user_id: int,
+        workout_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        normalized_payload, normalized_client_id = normalize_workout_payload(payload)
+        timestamp = utc_now()
+
+        with self._connection() as connection:
+            existing = self._get_workout_row(connection, user_id, workout_id)
+            if existing is None:
+                return None
+
+            resolved_client_id = existing["client_id"] or normalized_client_id
+            connection.execute(
+                """
+                UPDATE workouts
+                SET client_id = ?, workout_date = ?, payload_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    resolved_client_id,
+                    normalized_payload["workout_date"],
+                    json.dumps(normalized_payload, ensure_ascii=False),
+                    timestamp,
+                    workout_id,
+                    user_id,
+                ),
+            )
+
+            row = self._get_workout_row(connection, user_id, workout_id)
+
+        if row is None:
+            raise RuntimeError("Failed to update workout")
+        return self._deserialize_workout(row)
+
+    def delete_workout(self, user_id: int, workout_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            existing = self._get_workout_row(connection, user_id, workout_id)
+            if existing is None:
+                return None
+
+            connection.execute(
+                "DELETE FROM workouts WHERE id = ? AND user_id = ?",
+                (workout_id, user_id),
+            )
+
+        return self._deserialize_workout(existing)
+
+    def _get_workout_row(
+        self,
+        connection: sqlite3.Connection,
+        user_id: int,
+        workout_id: int,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            """
+            SELECT id, user_id, client_id, workout_date, payload_json, created_at, updated_at
+            FROM workouts
+            WHERE id = ? AND user_id = ?
+            """,
+            (workout_id, user_id),
+        ).fetchone()
+
     def _deserialize_workout(self, row: sqlite3.Row) -> dict[str, Any]:
         payload = json.loads(row["payload_json"])
         return {
             "id": row["id"],
+            "client_id": row["client_id"],
             "workout_date": payload["workout_date"],
             "plan_id": payload.get("plan_id"),
             "created_at": row["created_at"],

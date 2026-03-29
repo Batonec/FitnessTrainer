@@ -186,7 +186,7 @@ class MiniAppHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.end_headers()
 
     def do_GET(self) -> None:
@@ -379,6 +379,73 @@ class MiniAppHandler(BaseHTTPRequestHandler):
 
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
 
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path
+        workout_id = self._parse_workout_id(path)
+        if workout_id is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
+            return
+
+        payload = self._read_json_body()
+        if payload is None:
+            return
+
+        user, headers = self._resolve_current_user(allow_debug_fallback=True)
+        if user is None:
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "ok": False,
+                    "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                },
+            )
+            return
+
+        try:
+            workout = STORE.update_workout(int(user["id"]), workout_id, payload)
+        except ValueError as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
+            return
+
+        if workout is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Workout not found"})
+            return
+
+        self._send_json(
+            HTTPStatus.OK,
+            {"ok": True, "user": user, "workout": workout},
+            extra_headers=headers,
+        )
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        workout_id = self._parse_workout_id(path)
+        if workout_id is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
+            return
+
+        user, headers = self._resolve_current_user(allow_debug_fallback=True)
+        if user is None:
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "ok": False,
+                    "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                },
+            )
+            return
+
+        workout = STORE.delete_workout(int(user["id"]), workout_id)
+        if workout is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Workout not found"})
+            return
+
+        self._send_json(
+            HTTPStatus.OK,
+            {"ok": True, "user": user, "workout": workout, "deleted": True},
+            extra_headers=headers,
+        )
+
     def log_message(self, format: str, *args: object) -> None:
         print(f"[miniapp] {self.address_string()} - {format % args}")
 
@@ -440,6 +507,20 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             return candidate
 
         return None
+
+    def _parse_workout_id(self, path: str) -> int | None:
+        prefix = "/api/workouts/"
+        if not path.startswith(prefix):
+            return None
+
+        raw_id = path.removeprefix(prefix).strip("/")
+        if not raw_id or "/" in raw_id:
+            return None
+
+        try:
+            return int(raw_id)
+        except ValueError:
+            return None
 
     def _build_session_cookie(self, user_id: int) -> str:
         parts = [

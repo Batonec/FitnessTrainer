@@ -104,6 +104,32 @@ class MiniAppE2ETest(unittest.TestCase):
             ),
         )
 
+    def seed_single_workout(
+        self,
+        *,
+        client_id: str,
+        workout_date: str,
+        exercise_id: int,
+        exercise_name: str,
+        weight: float,
+        reps: int,
+    ) -> dict:
+        client = JsonHttpClient(self.app.base_url)
+        client.request_json("POST", "/api/session/resolve", {})
+        response = client.request_json(
+            "POST",
+            "/api/workouts",
+            sample_workout_payload(
+                client_id=client_id,
+                workout_date=workout_date,
+                exercise_id=exercise_id,
+                exercise_name=exercise_name,
+                weight=weight,
+                reps=reps,
+            ),
+        )
+        return response.payload["workout"]
+
     def test_can_create_two_same_day_workouts_and_latest_one_is_first(self) -> None:
         self.open_app()
 
@@ -160,6 +186,56 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
 
         expect(self.page.locator(".topbar-meta")).to_contain_text("UID 1")
+
+    def test_can_edit_workout_from_history(self) -> None:
+        self.seed_single_workout(
+            client_id="editable-e2e",
+            workout_date="2026-03-21",
+            exercise_id=915,
+            exercise_name="Редактируемый тест",
+            weight=120.0,
+            reps=12,
+        )
+        self.open_app()
+
+        self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
+        target_card = self.page.locator(".workout-card").filter(has_text="Редактируемый тест")
+        target_card.locator('[data-action="edit-workout"]').click()
+
+        expect(self.page.locator(".topbar-title")).to_have_text("Редактирование")
+        expect(self.page.locator("#workout-date")).to_have_value("2026-03-21")
+
+        self.page.locator('[data-action="edit-draft-set"]').first.click()
+        self.page.locator('[data-action="set-weight-inc"]').click()
+        self.page.locator('[data-action="set-reps-inc"]').click()
+        self.page.locator('[data-action="set-apply"]').click()
+        self.page.locator("#workout-date").fill("2026-03-22")
+        self.page.locator('[data-action="finish-workout"]').click()
+
+        expect(self.page.locator(".toast")).to_contain_text("Изменения в тренировке сохранены")
+        expect(self.page.locator(".topbar-title")).to_have_text("Trainings")
+        updated_card = self.page.locator(".workout-card").filter(has_text="Редактируемый тест")
+        expect(updated_card).to_contain_text("22 марта 2026")
+        expect(updated_card).to_contain_text("122,5 кг × 13")
+
+    def test_can_delete_workout_from_history(self) -> None:
+        self.seed_single_workout(
+            client_id="deletable-e2e",
+            workout_date="2026-03-23",
+            exercise_id=998,
+            exercise_name="Удаляемый тест",
+            weight=55.0,
+            reps=12,
+        )
+        self.open_app()
+
+        self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
+        self.page.on("dialog", lambda dialog: dialog.accept())
+        target_card = self.page.locator(".workout-card").filter(has_text="Удаляемый тест")
+        target_card.locator('[data-action="delete-workout"]').click()
+
+        expect(self.page.locator(".toast")).to_contain_text("Тренировка удалена")
+        expect(self.page.locator(".workout-card").filter(has_text="Удаляемый тест")).to_have_count(0)
 
 
 if __name__ == "__main__":

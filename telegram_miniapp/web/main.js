@@ -25,9 +25,13 @@ const state = {
   selectedProgressExerciseId: readNumberStorage(STORAGE_KEYS.progressExercise, null),
   currentUser: null,
   exercises: [],
+  workoutDate: getLocalTodayIso(),
   customWorkouts: sortWorkouts(readJsonStorage(STORAGE_KEYS.customWorkouts, [])),
   selectedExerciseId: null,
   workoutExercises: [],
+  editingWorkoutId: null,
+  editingWorkoutClientId: null,
+  activeSetEditor: null,
   isAddingExercise: false,
   isAddingSet: false,
   isSavingWorkout: false,
@@ -153,14 +157,26 @@ async function fetchJson(url) {
 }
 
 async function postJson(url, payload) {
+  return sendJson(url, "POST", payload);
+}
+
+async function putJson(url, payload) {
+  return sendJson(url, "PUT", payload);
+}
+
+async function deleteJson(url) {
+  return sendJson(url, "DELETE");
+}
+
+async function sendJson(url, method, payload = undefined) {
   const response = await fetch(url, {
-    method: "POST",
+    method,
     cache: "no-store",
     credentials: "same-origin",
     headers: {
       "Content-Type": "application/json; charset=utf-8",
     },
-    body: JSON.stringify(payload),
+    body: payload === undefined ? undefined : JSON.stringify(payload),
   });
 
   let responsePayload = {};
@@ -235,9 +251,33 @@ function handleClick(event) {
       refreshLocalData();
       break;
     case "reset-workout-draft":
-      resetDraftState();
-      showFlash("Черновик тренировки очищен");
-      render();
+      {
+        const wasEditingWorkout = Boolean(state.editingWorkoutId);
+        resetDraftState();
+        showFlash(wasEditingWorkout ? "Редактирование отменено" : "Черновик тренировки очищен");
+        render();
+      }
+      break;
+    case "edit-workout":
+      startEditingWorkout(Number(actionTarget.dataset.workoutId));
+      break;
+    case "delete-workout":
+      deleteWorkout(Number(actionTarget.dataset.workoutId));
+      break;
+    case "continue-exercise":
+      selectExercise(Number(actionTarget.dataset.exerciseId));
+      break;
+    case "edit-draft-set":
+      startEditingDraftSet(
+        Number(actionTarget.dataset.exerciseId),
+        Number(actionTarget.dataset.setIndex)
+      );
+      break;
+    case "remove-draft-set":
+      removeDraftSet(Number(actionTarget.dataset.exerciseId), Number(actionTarget.dataset.setIndex));
+      break;
+    case "remove-draft-exercise":
+      removeDraftExercise(Number(actionTarget.dataset.exerciseId));
       break;
     case "start-adding-exercise":
       state.isAddingExercise = true;
@@ -301,6 +341,9 @@ function handleChange(event) {
     case "select-progress-exercise":
       setSelectedProgressExercise(Number(actionTarget.value));
       break;
+    case "change-workout-date":
+      setWorkoutDate(String(actionTarget.value || ""));
+      break;
     default:
       break;
   }
@@ -347,6 +390,7 @@ async function refreshLocalData() {
     );
     state.currentUser = workoutsResponse.user || state.currentUser;
     ensureSelectedProgressExercise();
+    ensureEditingWorkoutStillExists();
     state.booting = false;
     state.loadError = null;
     ensureDraftExerciseStillExists();
@@ -366,7 +410,19 @@ function hydrateDraft() {
 
   state.selectedExerciseId =
     typeof draft.selectedExerciseId === "number" ? draft.selectedExerciseId : null;
-  state.workoutExercises = Array.isArray(draft.workoutExercises) ? draft.workoutExercises : [];
+  state.workoutExercises = normalizeDraftWorkoutExercises(draft.workoutExercises);
+  state.workoutDate =
+    typeof draft.workoutDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(draft.workoutDate)
+      ? draft.workoutDate
+      : getLocalTodayIso();
+  state.editingWorkoutId =
+    Number.isFinite(Number(draft.editingWorkoutId)) && Number(draft.editingWorkoutId) > 0
+      ? Number(draft.editingWorkoutId)
+      : null;
+  state.editingWorkoutClientId =
+    typeof draft.editingWorkoutClientId === "string" && draft.editingWorkoutClientId.trim()
+      ? draft.editingWorkoutClientId.trim()
+      : null;
 }
 
 function persistDraft() {
@@ -378,7 +434,33 @@ function persistDraft() {
   writeJsonStorage(STORAGE_KEYS.draft, {
     selectedExerciseId: state.selectedExerciseId,
     workoutExercises: state.workoutExercises,
+    workoutDate: state.workoutDate,
+    editingWorkoutId: state.editingWorkoutId,
+    editingWorkoutClientId: state.editingWorkoutClientId,
   });
+}
+
+function normalizeDraftWorkoutExercises(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((exercise) => exercise && typeof exercise === "object")
+    .map((exercise) => ({
+      exerciseId: Number(exercise.exerciseId),
+      exerciseName: String(exercise.exerciseName || exercise.name || "").trim(),
+      sets: Array.isArray(exercise.sets)
+        ? exercise.sets
+            .filter((workoutSet) => workoutSet && typeof workoutSet === "object")
+            .map((workoutSet) => ({
+              reps: Math.max(1, Number(workoutSet.reps) || 1),
+              weight: Math.max(0, Number(workoutSet.weight) || 0),
+              notes: workoutSet.notes ?? null,
+            }))
+        : [],
+    }))
+    .filter((exercise) => Number.isFinite(exercise.exerciseId) && exercise.exerciseName);
 }
 
 function ensureDraftExerciseStillExists() {
@@ -402,6 +484,20 @@ function ensureNewWorkoutFlow() {
   }
 }
 
+function ensureEditingWorkoutStillExists() {
+  if (!state.editingWorkoutId) {
+    return;
+  }
+
+  const stillExists = state.customWorkouts.some((workout) => workout.id === state.editingWorkoutId);
+  if (stillExists) {
+    return;
+  }
+
+  resetDraftState();
+  showFlash("Редактируемая тренировка больше не найдена");
+}
+
 function hasWorkoutDraft() {
   return state.workoutExercises.length > 0 || state.selectedExerciseId !== null;
 }
@@ -417,6 +513,10 @@ function countDraftExercises() {
 
 function getAllWorkouts() {
   return sortWorkouts(state.customWorkouts);
+}
+
+function getWorkoutById(workoutId) {
+  return state.customWorkouts.find((workout) => workout.id === workoutId) || null;
 }
 
 function sortWorkouts(workouts) {
@@ -503,6 +603,78 @@ function selectExercise(exerciseId) {
   render();
 }
 
+function setWorkoutDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return;
+  }
+
+  state.workoutDate = value;
+  persistDraft();
+}
+
+function startEditingWorkout(workoutId) {
+  const workout = getWorkoutById(workoutId);
+  if (!workout) {
+    showFlash("Тренировка для редактирования не найдена");
+    return;
+  }
+
+  state.currentTab = "new";
+  state.workoutDate = workout.workout_date;
+  state.selectedExerciseId = null;
+  state.workoutExercises = workout.data.exercises.map((exercise) => ({
+    exerciseId: exercise.exercise_id,
+    exerciseName: exercise.name,
+    sets: exercise.sets.map((workoutSet) => ({
+      reps: Number(workoutSet.reps) || 1,
+      weight: Number(workoutSet.weight) || 0,
+      notes: workoutSet.notes ?? null,
+    })),
+  }));
+  state.editingWorkoutId = workout.id;
+  state.editingWorkoutClientId =
+    typeof workout.client_id === "string" && workout.client_id.trim()
+      ? workout.client_id.trim()
+      : `workout-${workout.id}`;
+  state.activeSetEditor = null;
+  state.isAddingSet = false;
+  state.isSavingWorkout = false;
+  state.isAddingExercise = false;
+  writeTextStorage(STORAGE_KEYS.tab, "new");
+  persistDraft();
+  render();
+  showFlash("Тренировка открыта для редактирования");
+}
+
+async function deleteWorkout(workoutId) {
+  const workout = getWorkoutById(workoutId);
+  if (!workout) {
+    showFlash("Тренировка уже отсутствует");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Удалить тренировку от ${formatLongDate(workout.workout_date)}? Это действие нельзя отменить.`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const payload = await deleteJson(`/api/workouts/${workoutId}`);
+    state.currentUser = payload.user || state.currentUser;
+    state.customWorkouts = state.customWorkouts.filter((item) => item.id !== workoutId);
+    if (state.editingWorkoutId === workoutId) {
+      resetDraftState();
+    }
+    ensureSelectedProgressExercise();
+    render();
+    showFlash("Тренировка удалена");
+  } catch (error) {
+    showFlash(error.message || "Не удалось удалить тренировку");
+  }
+}
+
 function setSelectedProgressExercise(exerciseId) {
   if (!Number.isFinite(exerciseId) || exerciseId <= 0) {
     return;
@@ -521,12 +693,17 @@ function startAddingSet() {
 
   state.currentSetReps = 12;
   state.currentSetWeight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
+  state.activeSetEditor = {
+    exerciseId: selectedExercise.id,
+    setIndex: null,
+  };
   state.isAddingSet = true;
   render();
 }
 
 function cancelAddingSet() {
   state.isAddingSet = false;
+  state.activeSetEditor = null;
   render();
 }
 
@@ -545,11 +722,21 @@ function addStandardSet() {
 }
 
 function applySet() {
-  addSetToCurrentExercise({
+  const nextSet = {
     reps: state.currentSetReps,
     weight: state.currentSetWeight,
     notes: null,
-  });
+  };
+  if (state.activeSetEditor && Number.isInteger(state.activeSetEditor.setIndex)) {
+    updateDraftSet(
+      state.activeSetEditor.exerciseId,
+      state.activeSetEditor.setIndex,
+      nextSet
+    );
+  } else {
+    addSetToCurrentExercise(nextSet);
+  }
+  state.activeSetEditor = null;
   state.isAddingSet = false;
   render();
 }
@@ -588,6 +775,95 @@ function addSetToCurrentExercise(setData) {
   render();
 }
 
+function startEditingDraftSet(exerciseId, setIndex) {
+  const exercise = state.workoutExercises.find((item) => item.exerciseId === exerciseId);
+  const workoutSet = exercise?.sets?.[setIndex];
+  if (!exercise || !workoutSet) {
+    showFlash("Сет для редактирования не найден");
+    return;
+  }
+
+  state.selectedExerciseId = exerciseId;
+  state.isAddingExercise = false;
+  state.currentSetReps = Number(workoutSet.reps) || 1;
+  state.currentSetWeight = Number(workoutSet.weight) || 0;
+  state.activeSetEditor = { exerciseId, setIndex };
+  state.isAddingSet = true;
+  persistDraft();
+  render();
+}
+
+function updateDraftSet(exerciseId, setIndex, nextSet) {
+  state.workoutExercises = state.workoutExercises.map((exercise) => {
+    if (exercise.exerciseId !== exerciseId) {
+      return exercise;
+    }
+
+    return {
+      ...exercise,
+      sets: exercise.sets.map((workoutSet, index) =>
+        index === setIndex
+          ? {
+              reps: nextSet.reps,
+              weight: nextSet.weight,
+              notes: nextSet.notes ?? null,
+            }
+          : workoutSet
+      ),
+    };
+  });
+  persistDraft();
+}
+
+function removeDraftSet(exerciseId, setIndex) {
+  const nextExercises = [];
+
+  state.workoutExercises.forEach((exercise) => {
+    if (exercise.exerciseId !== exerciseId) {
+      nextExercises.push(exercise);
+      return;
+    }
+
+    const nextSets = exercise.sets.filter((_set, index) => index !== setIndex);
+    if (nextSets.length) {
+      nextExercises.push({
+        ...exercise,
+        sets: nextSets,
+      });
+    } else if (state.selectedExerciseId === exerciseId) {
+      state.selectedExerciseId = null;
+    }
+  });
+
+  state.workoutExercises = nextExercises;
+  if (!state.workoutExercises.some((exercise) => exercise.exerciseId === state.selectedExerciseId)) {
+    state.selectedExerciseId = null;
+  }
+  if (!state.workoutExercises.length && !state.selectedExerciseId) {
+    state.isAddingExercise = state.exercises.length > 0;
+  }
+  state.activeSetEditor = null;
+  state.isAddingSet = false;
+  persistDraft();
+  render();
+}
+
+function removeDraftExercise(exerciseId) {
+  state.workoutExercises = state.workoutExercises.filter(
+    (exercise) => exercise.exerciseId !== exerciseId
+  );
+  if (state.selectedExerciseId === exerciseId) {
+    state.selectedExerciseId = null;
+  }
+  if (!state.workoutExercises.length && !state.selectedExerciseId) {
+    state.isAddingExercise = state.exercises.length > 0;
+  }
+  state.activeSetEditor = null;
+  state.isAddingSet = false;
+  persistDraft();
+  render();
+}
+
 function finishExercise() {
   state.isAddingSet = false;
   state.isAddingExercise = true;
@@ -597,8 +873,7 @@ function finishExercise() {
 
 async function finishWorkout() {
   if (!state.workoutExercises.length) {
-    resetDraftState();
-    render();
+    showFlash("Добавь хотя бы одно упражнение");
     return;
   }
 
@@ -610,7 +885,10 @@ async function finishWorkout() {
   render();
 
   try {
-    const payload = await postJson("/api/workouts", buildLocalWorkout());
+    const editingWorkoutId = state.editingWorkoutId;
+    const payload = editingWorkoutId
+      ? await putJson(`/api/workouts/${editingWorkoutId}`, buildLocalWorkout())
+      : await postJson("/api/workouts", buildLocalWorkout());
     state.currentUser = payload.user || state.currentUser;
     state.customWorkouts = sortWorkouts([
       payload.workout,
@@ -618,11 +896,17 @@ async function finishWorkout() {
     ]);
     ensureSelectedProgressExercise();
     resetDraftState();
-    showFlash(
-      state.currentUser?.is_default_debug_user
-        ? "Тренировка сохранена на сервере для default user"
-        : "Тренировка сохранена на сервере"
-    );
+    if (editingWorkoutId) {
+      state.currentTab = "trainings";
+      writeTextStorage(STORAGE_KEYS.tab, "trainings");
+      showFlash("Изменения в тренировке сохранены");
+    } else {
+      showFlash(
+        state.currentUser?.is_default_debug_user
+          ? "Тренировка сохранена на сервере для default user"
+          : "Тренировка сохранена на сервере"
+      );
+    }
   } catch (error) {
     showFlash(error.message || "Не удалось сохранить тренировку");
   } finally {
@@ -632,8 +916,12 @@ async function finishWorkout() {
 }
 
 function resetDraftState() {
+  state.workoutDate = getLocalTodayIso();
   state.selectedExerciseId = null;
   state.workoutExercises = [];
+  state.editingWorkoutId = null;
+  state.editingWorkoutClientId = null;
+  state.activeSetEditor = null;
   state.isAddingExercise = state.exercises.length > 0;
   state.isAddingSet = false;
   state.currentSetReps = 12;
@@ -643,8 +931,8 @@ function resetDraftState() {
 
 function buildLocalWorkout() {
   return {
-    client_id: buildWorkoutClientId(),
-    workout_date: getLocalTodayIso(),
+    client_id: state.editingWorkoutClientId || buildWorkoutClientId(),
+    workout_date: state.workoutDate,
     plan_id: null,
     data: {
       focus: null,
@@ -992,15 +1280,17 @@ function renderTopbar() {
   const titles = {
     trainings: "Trainings",
     progress: "Progress",
-    new: "Новая тренировка",
+    new: state.editingWorkoutId ? "Редактирование" : "Новая тренировка",
   };
 
   const subtitles = {
     trainings: "История тренировок из серверного хранилища",
     progress: "Рост веса и повторений по выбранному упражнению",
-    new: state.currentUser?.is_default_debug_user
-      ? "Сохраним тренировку на backend под default browser user"
-      : "Сохраним тренировку на backend для текущего пользователя",
+    new: state.editingWorkoutId
+      ? `Обновим тренировку от ${formatLongDate(state.workoutDate)} и сохраним её для текущего пользователя`
+      : state.currentUser?.is_default_debug_user
+        ? "Сохраним тренировку на backend под default browser user"
+        : "Сохраним тренировку на backend для текущего пользователя",
   };
 
   const buildPills = buildTopbarPills();
@@ -1023,7 +1313,13 @@ function renderTopbar() {
         ${buildPills}
         <button class="action-button" data-action="finish-workout" ${
           state.isSavingWorkout ? "disabled" : ""
-        }>${state.isSavingWorkout ? "Сохраняю..." : "Закончить тренировку"}</button>
+        }>${
+          state.isSavingWorkout
+            ? "Сохраняю..."
+            : state.editingWorkoutId
+              ? "Сохранить изменения"
+              : "Закончить тренировку"
+        }</button>
       </div>
     `;
   }
@@ -1076,7 +1372,25 @@ function renderWorkoutCard(workout) {
           <div class="workout-date">${escapeHtml(formatLongDate(workout.workout_date))}</div>
           <div class="workout-day">${escapeHtml(formatWeekday(workout.workout_date))}</div>
         </div>
-        ${badge}
+        <div class="workout-header-side">
+          ${badge}
+          <div class="workout-card-actions">
+            <button
+              class="workout-action-button"
+              data-action="edit-workout"
+              data-workout-id="${workout.id}"
+            >
+              Редактировать
+            </button>
+            <button
+              class="workout-action-button workout-action-button-danger"
+              data-action="delete-workout"
+              data-workout-id="${workout.id}"
+            >
+              Удалить
+            </button>
+          </div>
+        </div>
       </div>
       <div class="stack">
         ${workout.data.exercises.map((exercise) => renderLoggedExerciseCard(exercise)).join("")}
@@ -1397,6 +1711,8 @@ function renderNewWorkoutScreen() {
 
   return `
     <section class="stack">
+      ${renderWorkoutMetaCard()}
+
       ${
         hasWorkoutDraft()
           ? renderDraftResumeCard(draftExercisesCount, state.exercises.length)
@@ -1464,36 +1780,74 @@ function renderDraftResumeCard(draftExercisesCount, totalExercisesCount) {
   const remainingExercisesCount = Math.max(0, totalExercisesCount - draftExercisesCount);
   return `
     <section class="card draft-banner">
-      <div class="draft-banner-title">Восстановлен черновик тренировки</div>
+      <div class="draft-banner-title">${
+        state.editingWorkoutId ? "Редактирование тренировки" : "Восстановлен черновик тренировки"
+      }</div>
       <div class="draft-banner-text">
-        Уже добавлено ${draftExercisesCount} из ${totalExercisesCount} упражнений.
-        Доступно для выбора ещё ${remainingExercisesCount}.
+        ${
+          state.editingWorkoutId
+            ? `Открыта тренировка от ${formatLongDate(state.workoutDate)}. Сейчас в ней ${draftExercisesCount} упражнений, добавить можно ещё ${remainingExercisesCount}.`
+            : `Уже добавлено ${draftExercisesCount} из ${totalExercisesCount} упражнений. Доступно для выбора ещё ${remainingExercisesCount}.`
+        }
       </div>
       <div class="draft-banner-actions">
-        <button class="secondary-button" data-action="reset-workout-draft">Начать заново</button>
+        <button class="secondary-button" data-action="reset-workout-draft">${
+          state.editingWorkoutId ? "Отменить редактирование" : "Начать заново"
+        }</button>
       </div>
     </section>
   `;
 }
 
 function renderDraftExerciseCard(exercise) {
-  const groupedSets = groupWorkoutSetsByWeightAndReps(exercise.sets);
   return `
     <article class="surface-card exercise-card">
-      <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
+      <div class="draft-exercise-head">
+        <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
+        <div class="draft-exercise-actions">
+          <button
+            class="draft-inline-button"
+            data-action="continue-exercise"
+            data-exercise-id="${exercise.exerciseId}"
+          >
+            + Сет
+          </button>
+          <button
+            class="draft-inline-button draft-inline-button-danger"
+            data-action="remove-draft-exercise"
+            data-exercise-id="${exercise.exerciseId}"
+          >
+            Удалить упражнение
+          </button>
+        </div>
+      </div>
       ${
-        groupedSets.length
+        exercise.sets.length
           ? `
             <div class="set-list">
-              ${groupedSets
+              ${exercise.sets
                 .map(
-                  (group) => `
-                    <div class="set-row">
-                      <span>${escapeHtml(
-                        group.count > 1
-                          ? `${formatWeight(group.weight)} кг × ${group.reps} × ${group.count}`
-                          : `${formatWeight(group.weight)} кг × ${group.reps}`
-                      )}</span>
+                  (workoutSet, index) => `
+                    <div class="set-row set-row-editable">
+                      <button
+                        class="set-row-main"
+                        data-action="edit-draft-set"
+                        data-exercise-id="${exercise.exerciseId}"
+                        data-set-index="${index}"
+                      >
+                        <span class="set-row-index">Сет ${index + 1}</span>
+                        <span>${escapeHtml(
+                          `${formatWeight(workoutSet.weight)} кг × ${workoutSet.reps}`
+                        )}</span>
+                      </button>
+                      <button
+                        class="set-row-remove-button"
+                        data-action="remove-draft-set"
+                        data-exercise-id="${exercise.exerciseId}"
+                        data-set-index="${index}"
+                      >
+                        Удалить
+                      </button>
                     </div>
                   `
                 )
@@ -1503,6 +1857,26 @@ function renderDraftExerciseCard(exercise) {
           : `<div class="exercise-empty">Сетов пока нет</div>`
       }
     </article>
+  `;
+}
+
+function renderWorkoutMetaCard() {
+  return `
+    <section class="card workout-meta-card">
+      <label class="field-label" for="workout-date">Дата тренировки</label>
+      <input
+        id="workout-date"
+        class="date-input"
+        type="date"
+        value="${escapeHtml(state.workoutDate)}"
+        data-action="change-workout-date"
+      />
+      <div class="metric-subtitle">${
+        state.editingWorkoutId
+          ? "Измени дату, если хочешь перенести эту тренировку на другой день."
+          : "Новая тренировка будет сохранена именно с этой датой."
+      }</div>
+    </section>
   `;
 }
 
@@ -1556,10 +1930,14 @@ function renderExercisePicker(exercises) {
 }
 
 function renderSetModal() {
+  const isEditingExistingSet = Boolean(
+    state.activeSetEditor && Number.isInteger(state.activeSetEditor.setIndex)
+  );
   return `
     <div class="modal-overlay">
       <section class="modal-card">
         <div class="stack">
+          <div class="modal-heading">${isEditingExistingSet ? "Редактировать сет" : "Новый сет"}</div>
           <div>
             <div class="modal-section-title">Вес</div>
             <div class="value-stepper">

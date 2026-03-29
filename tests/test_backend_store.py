@@ -205,6 +205,88 @@ class MiniAppStoreTest(unittest.TestCase):
         self.assertIsNone(workout["data"]["exercises"][0]["sets"][0]["notes"])
         self.assertEqual(workout["data"]["exercises"][0]["sets"][1]["notes"], "Last hard set")
 
+    def test_update_workout_rewrites_payload_and_bumps_updated_at(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+        created_workout, _ = self.store.save_workout(
+            int(user["id"]),
+            sample_workout_payload(
+                client_id="editable-workout",
+                workout_date="2026-03-20",
+                exercise_id=1,
+                exercise_name="Bench Press",
+                weight=80,
+                reps=10,
+            ),
+        )
+
+        updated_workout = self.store.update_workout(
+            int(user["id"]),
+            int(created_workout["id"]),
+            sample_workout_payload(
+                client_id="ignored-on-update",
+                workout_date="2026-03-28",
+                exercise_id=1,
+                exercise_name="Bench Press",
+                weight=92.5,
+                reps=8,
+                notes=" Updated set ",
+            ),
+        )
+
+        self.assertIsNotNone(updated_workout)
+        self.assertEqual(updated_workout["id"], created_workout["id"])
+        self.assertEqual(updated_workout["client_id"], "editable-workout")
+        self.assertEqual(updated_workout["workout_date"], "2026-03-28")
+        self.assertGreaterEqual(updated_workout["updated_at"], created_workout["updated_at"])
+        self.assertEqual(updated_workout["data"]["exercises"][0]["sets"][0]["weight"], 92.5)
+        self.assertEqual(updated_workout["data"]["exercises"][0]["sets"][0]["reps"], 8)
+        self.assertEqual(updated_workout["data"]["notes"], "Updated set")
+
+    def test_update_workout_returns_none_for_other_user(self) -> None:
+        first_user = self.store.ensure_debug_user("browser-default")
+        second_user = self.store.upsert_telegram_user({"id": 901002, "first_name": "Other"})
+        created_workout, _ = self.store.save_workout(
+            int(first_user["id"]),
+            sample_workout_payload(client_id="protected-workout"),
+        )
+
+        updated_workout = self.store.update_workout(
+            int(second_user["id"]),
+            int(created_workout["id"]),
+            sample_workout_payload(client_id="protected-workout", weight=95),
+        )
+
+        self.assertIsNone(updated_workout)
+        stored_workout = self.store.get_workout_by_id(int(first_user["id"]), int(created_workout["id"]))
+        self.assertIsNotNone(stored_workout)
+        self.assertEqual(stored_workout["data"]["exercises"][0]["sets"][0]["weight"], 80.0)
+
+    def test_delete_workout_removes_existing_record(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+        created_workout, _ = self.store.save_workout(
+            int(user["id"]),
+            sample_workout_payload(client_id="delete-me"),
+        )
+
+        deleted_workout = self.store.delete_workout(int(user["id"]), int(created_workout["id"]))
+
+        self.assertIsNotNone(deleted_workout)
+        self.assertEqual(deleted_workout["id"], created_workout["id"])
+        self.assertEqual(self.store.list_workouts(int(user["id"])), [])
+
+    def test_delete_workout_returns_none_when_workout_belongs_to_other_user(self) -> None:
+        first_user = self.store.ensure_debug_user("browser-default")
+        second_user = self.store.upsert_telegram_user({"id": 901003, "first_name": "Other"})
+        created_workout, _ = self.store.save_workout(
+            int(first_user["id"]),
+            sample_workout_payload(client_id="delete-protected"),
+        )
+
+        deleted_workout = self.store.delete_workout(int(second_user["id"]), int(created_workout["id"]))
+
+        self.assertIsNone(deleted_workout)
+        self.assertEqual(len(self.store.list_workouts(int(first_user["id"]))), 1)
+
 
 class NormalizeWorkoutPayloadTest(unittest.TestCase):
     def test_infers_heavy_load_type_from_volume(self) -> None:
