@@ -16,6 +16,7 @@ const PROGRESS_RANGES = [
 ];
 const TELEGRAM_INITDATA_WAIT_MS = 1800;
 const TELEGRAM_INITDATA_POLL_MS = 120;
+const WORKOUT_SWIPE_ACTIONS_WIDTH = 148;
 
 const state = {
   booting: true,
@@ -28,6 +29,7 @@ const state = {
     new: 0,
   },
   pendingScrollRestoreTop: null,
+  openWorkoutSwipeId: null,
   selectedRange: readTextStorage(STORAGE_KEYS.range, "DAYS_30"),
   selectedProgressExerciseId: readNumberStorage(STORAGE_KEYS.progressExercise, null),
   currentUser: null,
@@ -50,15 +52,22 @@ const state = {
 let flashTimeoutId = null;
 let devVersion = null;
 let hasOpenNewHistoryEntry = false;
+let workoutSwipeGesture = null;
+let suppressClickAfterSwipe = false;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
+root.addEventListener("pointerdown", handleWorkoutSwipePointerDown);
+window.addEventListener("pointermove", handleWorkoutSwipePointerMove, { passive: false });
+window.addEventListener("pointerup", handleWorkoutSwipePointerUp);
+window.addEventListener("pointercancel", handleWorkoutSwipePointerUp);
 window.addEventListener("popstate", handlePopState);
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.isAddingSet) {
     cancelAddingSet();
   }
 });
+installTestApi();
 
 bootstrap();
 
@@ -246,7 +255,23 @@ function getTelegramUnsafeUser() {
 }
 
 function handleClick(event) {
+  if (suppressClickAfterSwipe) {
+    suppressClickAfterSwipe = false;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
   const actionTarget = event.target.closest("[data-action]");
+  if (
+    !actionTarget &&
+    state.openWorkoutSwipeId != null &&
+    event.target.closest("[data-workout-swipe-actions]")
+  ) {
+    closeWorkoutSwipe();
+    return;
+  }
+
   if (!actionTarget) {
     return;
   }
@@ -395,6 +420,7 @@ function setCurrentTab(tab) {
   }
 
   captureScrollPosition(state.currentTab);
+  state.openWorkoutSwipeId = null;
   state.currentTab = tab;
   writeTextStorage(STORAGE_KEYS.tab, tab);
   ensureNewWorkoutFlow();
@@ -440,6 +466,7 @@ function getNewFlowReturnTab() {
 function openNewWorkout() {
   rememberNewFlowOrigin();
   captureScrollPosition(state.currentTab);
+  state.openWorkoutSwipeId = null;
   state.currentTab = "new";
   writeTextStorage(STORAGE_KEYS.tab, "new");
   ensureNewWorkoutFlow();
@@ -720,6 +747,7 @@ function startEditingWorkout(workoutId) {
 
   rememberNewFlowOrigin();
   captureScrollPosition(state.currentTab);
+  state.openWorkoutSwipeId = null;
   state.currentTab = "new";
   state.workoutDate = workout.workout_date;
   state.selectedExerciseId = null;
@@ -767,6 +795,9 @@ async function deleteWorkout(workoutId) {
     const payload = await deleteJson(`/api/workouts/${workoutId}`);
     state.currentUser = payload.user || state.currentUser;
     state.customWorkouts = state.customWorkouts.filter((item) => item.id !== workoutId);
+    if (state.openWorkoutSwipeId === workoutId) {
+      state.openWorkoutSwipeId = null;
+    }
     if (state.editingWorkoutId === workoutId) {
       resetDraftState();
     }
@@ -1038,6 +1069,7 @@ function resetDraftState() {
   state.editingWorkoutClientId = null;
   state.newFlowOriginTab = "trainings";
   hasOpenNewHistoryEntry = false;
+  state.openWorkoutSwipeId = null;
   state.activeSetEditor = null;
   state.isAddingExercise = state.exercises.length > 0;
   state.isAddingSet = false;
@@ -1416,6 +1448,144 @@ function pushNewFlowHistoryEntry() {
   syncBrowserHistory("push");
 }
 
+function closeWorkoutSwipe(renderAfter = true) {
+  if (state.openWorkoutSwipeId == null) {
+    return;
+  }
+
+  state.openWorkoutSwipeId = null;
+  if (renderAfter) {
+    render();
+  }
+}
+
+function applyWorkoutSwipeOffset(surface, offset, withTransition = false) {
+  if (!surface) {
+    return;
+  }
+
+  if (withTransition) {
+    surface.classList.remove("workout-card-surface-dragging");
+  } else {
+    surface.classList.add("workout-card-surface-dragging");
+  }
+  surface.style.transform = `translateX(${offset}px)`;
+}
+
+function handleWorkoutSwipePointerDown(event) {
+  const swipeCard = event.target.closest("[data-workout-swipe-card]");
+  if (!swipeCard) {
+    if (
+      state.openWorkoutSwipeId != null &&
+      !event.target.closest("[data-workout-swipe-actions]")
+    ) {
+      closeWorkoutSwipe();
+    }
+    return;
+  }
+
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
+  if (event.target.closest("[data-action]")) {
+    return;
+  }
+
+  if (event.target.closest("a, input, select, textarea, label")) {
+    return;
+  }
+
+  const surface = swipeCard.querySelector("[data-workout-swipe-surface]");
+  if (!surface) {
+    return;
+  }
+
+  const workoutId = Number(surface.dataset.workoutId);
+  if (!Number.isFinite(workoutId)) {
+    return;
+  }
+
+  if (state.openWorkoutSwipeId != null && state.openWorkoutSwipeId !== workoutId) {
+    closeWorkoutSwipe();
+    return;
+  }
+
+  workoutSwipeGesture = {
+    pointerId: event.pointerId,
+    workoutId,
+    surface,
+    startX: event.clientX,
+    startY: event.clientY,
+    baseOffset: state.openWorkoutSwipeId === workoutId ? -WORKOUT_SWIPE_ACTIONS_WIDTH : 0,
+    lastOffset: state.openWorkoutSwipeId === workoutId ? -WORKOUT_SWIPE_ACTIONS_WIDTH : 0,
+    mode: "pending",
+  };
+
+  surface.setPointerCapture?.(event.pointerId);
+}
+
+function handleWorkoutSwipePointerMove(event) {
+  if (!workoutSwipeGesture || event.pointerId !== workoutSwipeGesture.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - workoutSwipeGesture.startX;
+  const deltaY = event.clientY - workoutSwipeGesture.startY;
+
+  if (workoutSwipeGesture.mode === "pending") {
+    if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) {
+      return;
+    }
+
+    if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+      workoutSwipeGesture.mode = "scrolling";
+      return;
+    }
+
+    workoutSwipeGesture.mode = "swiping";
+  }
+
+  if (workoutSwipeGesture.mode !== "swiping") {
+    return;
+  }
+
+  event.preventDefault();
+  const nextOffset = Math.max(
+    -WORKOUT_SWIPE_ACTIONS_WIDTH,
+    Math.min(0, workoutSwipeGesture.baseOffset + deltaX)
+  );
+  workoutSwipeGesture.lastOffset = nextOffset;
+  applyWorkoutSwipeOffset(workoutSwipeGesture.surface, nextOffset, false);
+}
+
+function handleWorkoutSwipePointerUp(event) {
+  if (!workoutSwipeGesture || event.pointerId !== workoutSwipeGesture.pointerId) {
+    return;
+  }
+
+  const { surface, workoutId, mode, baseOffset } = workoutSwipeGesture;
+  const deltaX = event.clientX - workoutSwipeGesture.startX;
+  const deltaY = event.clientY - workoutSwipeGesture.startY;
+  const finalOffset = Math.max(-WORKOUT_SWIPE_ACTIONS_WIDTH, Math.min(0, baseOffset + deltaX));
+  const treatedAsSwipe =
+    mode === "swiping" || (Math.abs(deltaX) > 14 && Math.abs(deltaX) > Math.abs(deltaY));
+  surface.releasePointerCapture?.(event.pointerId);
+  workoutSwipeGesture = null;
+
+  if (treatedAsSwipe) {
+    const shouldOpen = finalOffset <= -WORKOUT_SWIPE_ACTIONS_WIDTH / 2;
+    state.openWorkoutSwipeId = shouldOpen ? workoutId : null;
+    suppressClickAfterSwipe = true;
+    render();
+    return;
+  }
+
+  if (mode === "pending" && state.openWorkoutSwipeId === workoutId) {
+    closeWorkoutSwipe();
+  }
+}
+
 function restoreTabFromHistory(tab, options = {}) {
   const nextTab = tab === "new" ? "new" : normalizeNavTab(tab);
   if (options.captureCurrent !== false && nextTab !== state.currentTab) {
@@ -1470,6 +1640,29 @@ function handleTelegramBackRequest() {
   if (state.currentTab === "new") {
     closeNewWorkout();
   }
+}
+
+function installTestApi() {
+  if (!isLocalDevHost()) {
+    return;
+  }
+
+  window.__trainerMiniAppTestApi = {
+    openWorkoutSwipe(workoutId) {
+      const normalizedId = Number(workoutId);
+      if (!Number.isFinite(normalizedId)) {
+        return false;
+      }
+
+      state.openWorkoutSwipeId = normalizedId;
+      render();
+      return true;
+    },
+    closeOpenWorkoutSwipe() {
+      closeWorkoutSwipe();
+      return true;
+    },
+  };
 }
 
 function render() {
@@ -1602,38 +1795,79 @@ function renderTrainingsScreen() {
 
 function renderWorkoutCard(workout) {
   const badge = workout.data.load_type ? renderLoadBadge(workout.data.load_type) : "";
+  const isSwipeOpen = state.openWorkoutSwipeId === workout.id;
   return `
-    <section class="workout-card">
-      <div class="workout-header">
-        <div>
-          <div class="workout-date">${escapeHtml(formatLongDate(workout.workout_date))}</div>
-          <div class="workout-day">${escapeHtml(formatWeekday(workout.workout_date))}</div>
-        </div>
-        <div class="workout-header-side">
-          ${badge}
-          <div class="workout-card-actions">
-            <button
-              class="workout-action-button"
-              data-action="edit-workout"
-              data-workout-id="${workout.id}"
-            >
-              Редактировать
-            </button>
-            <button
-              class="workout-action-button workout-action-button-danger"
-              data-action="delete-workout"
-              data-workout-id="${workout.id}"
-            >
-              Удалить
-            </button>
+    <section
+      class="workout-swipe-card ${isSwipeOpen ? "workout-swipe-card-open" : ""}"
+      data-workout-swipe-card
+    >
+      <div class="workout-swipe-actions" data-workout-swipe-actions>
+        <button
+          class="workout-swipe-action workout-swipe-action-edit"
+          data-action="edit-workout"
+          data-workout-id="${workout.id}"
+          aria-label="Редактировать тренировку"
+          title="Редактировать тренировку"
+        >
+          ${renderSwipeActionIcon("edit")}
+          <span class="sr-only">Редактировать</span>
+        </button>
+        <button
+          class="workout-swipe-action workout-swipe-action-delete"
+          data-action="delete-workout"
+          data-workout-id="${workout.id}"
+          aria-label="Удалить тренировку"
+          title="Удалить тренировку"
+        >
+          ${renderSwipeActionIcon("delete")}
+          <span class="sr-only">Удалить</span>
+        </button>
+      </div>
+      <div
+        class="workout-card workout-card-surface ${isSwipeOpen ? "workout-card-surface-open" : ""}"
+        data-workout-swipe-surface
+        data-workout-id="${workout.id}"
+      >
+        <div class="workout-header">
+          <div>
+            <div class="workout-date">${escapeHtml(formatLongDate(workout.workout_date))}</div>
+            <div class="workout-day">${escapeHtml(formatWeekday(workout.workout_date))}</div>
+          </div>
+          <div class="workout-header-side">
+            ${badge}
           </div>
         </div>
-      </div>
-      <div class="stack">
-        ${workout.data.exercises.map((exercise) => renderLoggedExerciseCard(exercise)).join("")}
+        <div class="stack">
+          ${workout.data.exercises.map((exercise) => renderLoggedExerciseCard(exercise)).join("")}
+        </div>
       </div>
     </section>
   `;
+}
+
+function renderSwipeActionIcon(kind) {
+  switch (kind) {
+    case "edit":
+      return `
+        <svg class="workout-swipe-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M4 20h3.75l10.2-10.2-3.75-3.75L4 16.25V20zm14.7-11.95a1 1 0 0 0 0-1.4l-1.35-1.35a1 1 0 0 0-1.4 0L14.9 6.35l3.75 3.75 1.05-1.05z"
+            fill="currentColor"
+          />
+        </svg>
+      `;
+    case "delete":
+      return `
+        <svg class="workout-swipe-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 7h2v7h-2v-7zm4 0h2v7h-2v-7zM7 8h10l-.85 11.1A2 2 0 0 1 14.16 21H9.84a2 2 0 0 1-1.99-1.9L7 8z"
+            fill="currentColor"
+          />
+        </svg>
+      `;
+    default:
+      return "";
+  }
 }
 
 function renderLoggedExerciseCard(exercise) {

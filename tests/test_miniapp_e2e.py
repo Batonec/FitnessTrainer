@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 
 from support import JsonHttpClient, WEB_DIR, running_miniapp_server, sample_workout_payload
@@ -73,6 +74,63 @@ class MiniAppE2ETest(unittest.TestCase):
     def add_default_set(self) -> None:
         self.page.locator('[data-action="start-adding-set"]').click()
         self.page.locator('[data-action="set-apply"]').click()
+
+    def reveal_workout_actions(self, card_locator) -> None:
+        surface = card_locator.locator('[data-workout-swipe-surface]').first
+        surface.scroll_into_view_if_needed()
+        box = surface.bounding_box()
+        self.assertIsNotNone(box)
+        start_x = box["x"] + box["width"] - 18
+        end_x = start_x - 150
+        y = box["y"] + min(48, box["height"] / 2)
+
+        self.page.mouse.move(start_x, y)
+        self.page.mouse.down()
+        self.page.mouse.move(end_x, y, steps=12)
+        self.page.mouse.up()
+        expect(surface).to_have_class(re.compile(r".*workout-card-surface-open.*"))
+
+    def click_workout_action(self, card_locator, action: str) -> None:
+        button = card_locator.locator(f'[data-action="{action}"]').first
+        button.scroll_into_view_if_needed()
+        box = button.bounding_box()
+        self.assertIsNotNone(box)
+        self.page.mouse.click(
+            box["x"] + box["width"] / 2,
+            box["y"] + box["height"] / 2,
+        )
+
+    def hide_workout_actions_with_swipe(self, card_locator) -> None:
+        surface = card_locator.locator('[data-workout-swipe-surface]').first
+        surface.scroll_into_view_if_needed()
+        box = surface.bounding_box()
+        self.assertIsNotNone(box)
+        start_x = box["x"] + max(72, box["width"] * 0.38)
+        end_x = min(box["x"] + box["width"] - 18, start_x + 180)
+        y = box["y"] + min(48, box["height"] / 2)
+
+        self.page.mouse.move(start_x, y)
+        self.page.mouse.down()
+        self.page.mouse.move(end_x, y, steps=12)
+        self.page.mouse.up()
+        expect(surface).not_to_have_class(re.compile(r".*workout-card-surface-open.*"))
+
+    def tap_workout_action_background(self, card_locator) -> None:
+        actions = card_locator.locator("[data-workout-swipe-actions]").first
+        actions.scroll_into_view_if_needed()
+        box = actions.bounding_box()
+        self.assertIsNotNone(box)
+        self.page.mouse.click(box["x"] + box["width"] - 26, box["y"] + 16)
+
+    def open_workout_actions_via_test_api(self, card_locator) -> None:
+        surface = card_locator.locator('[data-workout-swipe-surface]').first
+        workout_id = surface.get_attribute("data-workout-id")
+        self.assertIsNotNone(workout_id)
+        self.page.evaluate(
+            "(workoutId) => window.__trainerMiniAppTestApi.openWorkoutSwipe(workoutId)",
+            workout_id,
+        )
+        expect(surface).to_have_class(re.compile(r".*workout-card-surface-open.*"))
 
     def seed_progress_workouts(self) -> None:
         client = JsonHttpClient(self.app.base_url)
@@ -167,6 +225,55 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator(".toast")).to_contain_text("Тренировка сохранена")
 
         expect(self.page.locator(".workout-card").first).to_contain_text("Тяга верт.")
+
+    def test_swiping_workout_card_reveals_actions(self) -> None:
+        self.seed_single_workout(
+            client_id="swipe-gesture-test",
+            workout_date="2026-03-29",
+            exercise_id=777,
+            exercise_name="Свайп тест",
+            weight=70.0,
+            reps=10,
+        )
+        self.open_app()
+
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Свайп тест")
+        self.reveal_workout_actions(target_card)
+        expect(target_card.locator('[data-action="edit-workout"]')).to_be_visible()
+        expect(target_card.locator('[data-action="delete-workout"]')).to_be_visible()
+
+    def test_open_swipe_card_can_be_closed_by_swiping_right(self) -> None:
+        self.seed_single_workout(
+            client_id="swipe-close-right-test",
+            workout_date="2026-03-28",
+            exercise_id=778,
+            exercise_name="Свайп закрытие",
+            weight=72.5,
+            reps=9,
+        )
+        self.open_app()
+
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Свайп закрытие")
+        self.reveal_workout_actions(target_card)
+        self.hide_workout_actions_with_swipe(target_card)
+
+    def test_open_swipe_card_can_be_closed_by_tapping_free_action_area(self) -> None:
+        self.seed_single_workout(
+            client_id="swipe-close-background-test",
+            workout_date="2026-03-27",
+            exercise_id=779,
+            exercise_name="Тап закрытие",
+            weight=67.5,
+            reps=11,
+        )
+        self.open_app()
+
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Тап закрытие")
+        self.reveal_workout_actions(target_card)
+        self.tap_workout_action_background(target_card)
+        expect(
+            target_card.locator('[data-workout-swipe-surface]').first
+        ).not_to_have_class(re.compile(r".*workout-card-surface-open.*"))
 
     def test_restored_draft_can_be_reset_from_ui(self) -> None:
         self.open_app()
@@ -275,8 +382,9 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
 
         self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
-        target_card = self.page.locator(".workout-card").filter(has_text="Редактируемый тест")
-        target_card.locator('[data-action="edit-workout"]').click()
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Редактируемый тест")
+        self.open_workout_actions_via_test_api(target_card)
+        self.click_workout_action(target_card, "edit-workout")
 
         expect(self.page.locator(".topbar-title")).to_have_text("Редактирование")
         expect(self.page.locator("#workout-date")).to_have_value("2026-03-21")
@@ -307,8 +415,9 @@ class MiniAppE2ETest(unittest.TestCase):
 
         self.page.locator('[data-action="switch-tab"][data-tab="trainings"]').click()
         self.page.on("dialog", lambda dialog: dialog.accept())
-        target_card = self.page.locator(".workout-card").filter(has_text="Удаляемый тест")
-        target_card.locator('[data-action="delete-workout"]').click()
+        target_card = self.page.locator(".workout-swipe-card").filter(has_text="Удаляемый тест")
+        self.open_workout_actions_via_test_api(target_card)
+        self.click_workout_action(target_card, "delete-workout")
 
         expect(self.page.locator(".toast")).to_contain_text("Тренировка удалена")
         expect(self.page.locator(".workout-card").filter(has_text="Удаляемый тест")).to_have_count(0)
