@@ -2020,11 +2020,36 @@ function summarizeExerciseSets(sets) {
   }
 
   return {
-    parts: grouped.map((group) => `${formatWeight(group.weight)} кг × ${group.reps.join(", ")}`),
+    parts: grouped.map((group) => `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`),
     notes: sets
       .map((set) => (typeof set.notes === "string" ? set.notes.trim() : ""))
       .filter(Boolean),
   };
+}
+
+function summarizeRepRuns(reps) {
+  if (!Array.isArray(reps) || !reps.length) {
+    return "0";
+  }
+
+  const parts = [];
+  let currentRep = reps[0];
+  let count = 1;
+
+  for (let index = 1; index < reps.length; index += 1) {
+    const nextRep = reps[index];
+    if (nextRep === currentRep) {
+      count += 1;
+      continue;
+    }
+
+    parts.push(count > 1 ? `${currentRep}×${count}` : String(currentRep));
+    currentRep = nextRep;
+    count = 1;
+  }
+
+  parts.push(count > 1 ? `${currentRep}×${count}` : String(currentRep));
+  return parts.join(", ");
 }
 
 function renderProgressScreen() {

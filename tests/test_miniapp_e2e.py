@@ -480,7 +480,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator(".topbar-title")).to_have_text("Trainings")
         updated_card = self.page.locator(".workout-card").filter(has_text="Редактируемый тест")
         expect(updated_card).to_contain_text("22 марта 2026")
-        expect(updated_card).to_contain_text("122,5 кг × 13")
+        expect(updated_card).to_contain_text("122,5кг ×13")
 
     def test_can_delete_workout_from_history(self) -> None:
         self.seed_single_workout(
