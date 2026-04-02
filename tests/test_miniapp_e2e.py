@@ -100,6 +100,17 @@ class MiniAppE2ETest(unittest.TestCase):
         self.page.go_back()
         expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
 
+    def respond_to_next_dialog(self, *, accept: bool, contains: str | None = None) -> None:
+        def handler(dialog) -> None:
+            if contains is not None:
+                self.assertIn(contains, dialog.message)
+            if accept:
+                dialog.accept()
+            else:
+                dialog.dismiss()
+
+        self.page.once("dialog", handler)
+
     def add_default_set(self) -> None:
         if self.page.locator(".modal-card").count() == 0:
             self.page.locator('[data-action="start-adding-set"]').click()
@@ -468,14 +479,14 @@ class MiniAppE2ETest(unittest.TestCase):
 
         self.page.locator('[data-action="apply-workout-plan"]').click()
 
-        expect(self.page.locator(".draft-banner")).to_contain_text("Черновик по плану следующей тренировки")
-        expect(self.page.locator(".draft-banner")).to_contain_text("28 марта 2026")
         expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_contain_text("80 кг × 16")
         expect(self.page.locator(".exercise-card").filter(has_text="Тяга верт.")).to_contain_text("65 кг × 11")
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
 
         self.leave_new_workout()
         self.open_new_workout()
-        expect(self.page.locator(".draft-banner")).to_contain_text("Черновик по плану следующей тренировки")
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
 
     def test_exercise_picker_prioritizes_main_history_block_and_hides_rest_under_more(self) -> None:
         self.seed_popular_exercise_picker_history()
@@ -551,19 +562,34 @@ class MiniAppE2ETest(unittest.TestCase):
         self.add_default_set()
         self.page.reload(wait_until="networkidle")
 
-        expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
-        self.page.locator('[data-action="start-adding-exercise"]').click()
-        expect(self.page.locator(".exercise-picker")).to_be_visible()
-
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим гор.")).to_be_visible()
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
+        self.respond_to_next_dialog(accept=True, contains="Сбросить текущий черновик")
         self.page.locator('[data-action="reset-workout-draft"]').first.click()
 
-        expect(self.page.locator(".draft-banner")).to_have_count(0)
+        expect(self.page.locator(".exercise-card")).to_have_count(0)
+        expect(self.page.locator(".exercise-picker")).to_be_visible()
         expect(
             self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.")
         ).to_be_visible()
         expect(
             self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
         ).to_be_visible()
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
+
+    def test_reset_draft_fab_keeps_draft_when_dialog_is_dismissed(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим гор.")
+        self.add_default_set()
+
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим гор.")).to_be_visible()
+        self.respond_to_next_dialog(accept=False, contains="Сбросить текущий черновик")
+        self.page.locator('[data-action="reset-workout-draft"]').first.click()
+
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим гор.")).to_be_visible()
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
 
     def test_can_leave_new_workout_and_resume_saved_draft(self) -> None:
         self.open_app()
@@ -577,8 +603,8 @@ class MiniAppE2ETest(unittest.TestCase):
 
         self.open_new_workout()
 
-        expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
         expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
 
     def test_new_workout_supports_alternating_superset_sets(self) -> None:
         self.open_app()
@@ -639,7 +665,8 @@ class MiniAppE2ETest(unittest.TestCase):
 
         expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
         self.open_new_workout()
-        expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
 
     def test_progress_screen_shows_weight_and_rep_growth_for_selected_exercise(self) -> None:
         self.seed_progress_workouts()

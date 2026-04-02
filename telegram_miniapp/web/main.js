@@ -327,30 +327,7 @@ function handleClick(event) {
       refreshLocalData();
       break;
     case "reset-workout-draft":
-      {
-        const wasEditingWorkout = Boolean(state.editingWorkoutId);
-        const returnTab = getNewFlowReturnTab();
-        const shouldUseHistoryBack = hasOpenNewHistoryEntry;
-        resetDraftState();
-        if (wasEditingWorkout) {
-          if (shouldUseHistoryBack) {
-            state.currentTab = returnTab;
-            writeTextStorage(STORAGE_KEYS.tab, returnTab);
-            queueScrollRestore(returnTab);
-            window.history.back();
-          } else {
-            state.currentTab = returnTab;
-            writeTextStorage(STORAGE_KEYS.tab, returnTab);
-            queueScrollRestore(returnTab);
-            syncBrowserHistory("replace");
-            render();
-          }
-          showFlash("Редактирование отменено");
-        } else {
-          showFlash("Черновик тренировки очищен");
-          render();
-        }
-      }
+      resetWorkoutDraftWithConfirmation();
       break;
     case "edit-workout":
       startEditingWorkout(Number(actionTarget.dataset.workoutId));
@@ -1403,6 +1380,38 @@ function resetDraftState() {
   state.currentSetReps = 12;
   state.currentSetWeight = 0;
   localStorage.removeItem(STORAGE_KEYS.draft);
+}
+
+function resetWorkoutDraftWithConfirmation() {
+  const confirmMessage = state.editingWorkoutId
+    ? "Отменить редактирование и сбросить изменения?"
+    : "Сбросить текущий черновик тренировки?";
+  if (!window.confirm(confirmMessage)) {
+    return;
+  }
+
+  const wasEditingWorkout = Boolean(state.editingWorkoutId);
+  const returnTab = getNewFlowReturnTab();
+  const shouldUseHistoryBack = hasOpenNewHistoryEntry;
+  resetDraftState();
+  if (wasEditingWorkout) {
+    if (shouldUseHistoryBack) {
+      state.currentTab = returnTab;
+      writeTextStorage(STORAGE_KEYS.tab, returnTab);
+      queueScrollRestore(returnTab);
+      window.history.back();
+    } else {
+      state.currentTab = returnTab;
+      writeTextStorage(STORAGE_KEYS.tab, returnTab);
+      queueScrollRestore(returnTab);
+      syncBrowserHistory("replace");
+      render();
+    }
+    showFlash("Редактирование отменено");
+  } else {
+    showFlash("Черновик тренировки очищен");
+    render();
+  }
 }
 
 function buildLocalWorkout() {
@@ -2759,19 +2768,12 @@ function renderNewWorkoutScreen() {
     !hasWorkoutDraft() &&
     !state.isAddingExercise &&
     Boolean(nextWorkoutPlan);
-  const draftExercisesCount = countDraftExercises();
 
   return `
     <section class="stack">
       ${
         shouldShowPlanSuggestion && nextWorkoutPlan
           ? renderNewWorkoutPlanSuggestionCard(nextWorkoutPlan)
-          : ""
-      }
-
-      ${
-        hasWorkoutDraft()
-          ? renderDraftResumeCard(draftExercisesCount, state.exercises.length)
           : ""
       }
 
@@ -2803,38 +2805,6 @@ function renderNewWorkoutScreen() {
           ? `<p class="muted-note">Все упражнения из локальной базы уже добавлены в эту тренировку.</p>`
           : ""
       }
-    </section>
-  `;
-}
-
-function renderDraftResumeCard(draftExercisesCount, totalExercisesCount) {
-  const remainingExercisesCount = Math.max(0, totalExercisesCount - draftExercisesCount);
-  const planDate = state.appliedWorkoutPlan?.generatedFromWorkoutDate
-    ? formatLongDate(state.appliedWorkoutPlan.generatedFromWorkoutDate)
-    : null;
-  return `
-    <section class="card draft-banner">
-      <div class="draft-banner-title">${
-        state.editingWorkoutId
-          ? "Редактирование тренировки"
-          : hasAppliedWorkoutPlan()
-            ? "Черновик по плану следующей тренировки"
-            : "Восстановлен черновик тренировки"
-      }</div>
-      <div class="draft-banner-text">
-        ${
-          state.editingWorkoutId
-            ? `Открыта тренировка от ${formatLongDate(state.workoutDate)}. Сейчас в ней ${draftExercisesCount} упражнений, добавить можно ещё ${remainingExercisesCount}.`
-            : hasAppliedWorkoutPlan() && planDate
-              ? `Черновик собран по плану на основе тренировки от ${planDate}. Уже добавлено ${draftExercisesCount} упражнений, можно скорректировать повторы, веса или состав.`
-            : `Уже добавлено ${draftExercisesCount} из ${totalExercisesCount} упражнений. Доступно для выбора ещё ${remainingExercisesCount}.`
-        }
-      </div>
-      <div class="draft-banner-actions">
-        <button class="secondary-button" data-action="reset-workout-draft">${
-          state.editingWorkoutId ? "Отменить редактирование" : "Начать заново"
-        }</button>
-      </div>
     </section>
   `;
 }
@@ -3006,7 +2976,6 @@ function renderExercisePicker(exercises) {
         state.workoutExercises.length || state.selectedExerciseId
           ? `
             <div class="picker-footer">
-              <button class="secondary-button picker-footer-button" data-action="reset-workout-draft">Начать заново</button>
               <button class="secondary-button picker-footer-button picker-footer-button-subtle" data-action="cancel-adding-exercise">Отмена</button>
             </div>
           `
@@ -3118,17 +3087,35 @@ function renderFloatingActionButton() {
     `;
   }
 
-  if (state.currentTab === "new" && state.workoutExercises.length > 0) {
-    return `
-      <button
-        class="floating-action-button floating-action-button-save"
-        data-action="finish-workout"
-        aria-label="${state.isSavingWorkout ? "Сохраняю тренировку" : "Сохранить тренировку"}"
-        ${state.isSavingWorkout ? "disabled" : ""}
-      >
-        ${iconMarkup("save")}
-      </button>
-    `;
+  if (state.currentTab === "new") {
+    const actions = [];
+
+    if (hasWorkoutDraft()) {
+      actions.push(`
+        <button
+          class="floating-action-button floating-action-button-secondary floating-action-button-danger"
+          data-action="reset-workout-draft"
+          aria-label="${state.editingWorkoutId ? "Отменить редактирование" : "Сбросить черновик"}"
+        >
+          ${iconMarkup("reset")}
+        </button>
+      `);
+    }
+
+    if (state.workoutExercises.length > 0) {
+      actions.push(`
+        <button
+          class="floating-action-button floating-action-button-save"
+          data-action="finish-workout"
+          aria-label="${state.isSavingWorkout ? "Сохраняю тренировку" : "Сохранить тренировку"}"
+          ${state.isSavingWorkout ? "disabled" : ""}
+        >
+          ${iconMarkup("save")}
+        </button>
+      `);
+    }
+
+    return actions.join("");
   }
 
   return "";
@@ -3315,6 +3302,15 @@ function iconMarkup(name) {
     return `
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 12.5l4 4l8-9"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "reset") {
+    return `
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 7l10 10"></path>
+        <path d="M17 7L7 17"></path>
       </svg>
     `;
   }
