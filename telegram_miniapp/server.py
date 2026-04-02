@@ -30,6 +30,7 @@ DEFAULT_DEBUG_USER_ALIAS = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_ALIAS", "browse
 DEFAULT_DEBUG_USER_FIRST_NAME = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_FIRST_NAME", "Browser")
 DEFAULT_DEBUG_USER_LAST_NAME = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_LAST_NAME", "Debug")
 DB_PATH = Path(os.getenv("MINIAPP_DB_PATH", str(DATA_DIR / "trainer.db")))
+RECOVERY_TELEGRAM_USER_ID = int(os.getenv("MINIAPP_TELEGRAM_RECOVERY_USER_ID", "0") or "0")
 SESSION_COOKIE_NAME = "trainer_session"
 SESSION_SECRET = os.getenv("MINIAPP_SESSION_SECRET") or BOT_TOKEN or "trainer-dev-session-secret"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("MINIAPP_SESSION_MAX_AGE", "2592000"))
@@ -147,6 +148,15 @@ def debug_user_enabled() -> bool:
     return DEV_MODE or ALLOW_DEBUG_USER
 
 
+def get_telegram_recovery_user() -> dict[str, Any] | None:
+    if RECOVERY_TELEGRAM_USER_ID <= 0:
+        return None
+    user = STORE.get_user_by_id(RECOVERY_TELEGRAM_USER_ID)
+    if user is None or user.get("auth_source") == "debug":
+        return None
+    return user
+
+
 def make_session_value(user_id: int) -> str:
     payload = str(user_id)
     signature = hmac.new(
@@ -255,10 +265,17 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 return
 
             unsafe_telegram_user = payload.get("unsafeUser")
+            request_shell = str(payload.get("shell", "") or "").strip().lower()
+            is_telegram_shell = request_shell == "telegram"
             current_user, current_headers = self._resolve_current_user()
             has_init_data = bool(payload.get("initData"))
 
-            if not has_init_data and not isinstance(unsafe_telegram_user, dict) and debug_user_enabled():
+            if (
+                not has_init_data
+                and not isinstance(unsafe_telegram_user, dict)
+                and debug_user_enabled()
+                and not is_telegram_shell
+            ):
                 if current_user is None or current_user.get("auth_source") != "debug":
                     user = STORE.ensure_debug_user(
                         DEFAULT_DEBUG_USER_ALIAS,
@@ -273,6 +290,14 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                     )
                     return
 
+            if (
+                current_user is not None
+                and is_telegram_shell
+                and current_user.get("auth_source") == "debug"
+            ):
+                current_user = None
+                current_headers = {}
+
             if current_user is not None and not has_init_data:
                 self._send_json(
                     HTTPStatus.OK,
@@ -286,7 +311,9 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             if init_data:
                 validation_result = validate_init_data(init_data, BOT_TOKEN)
                 if not validation_result.get("ok"):
-                    if not isinstance(unsafe_telegram_user, dict):
+                    if not isinstance(unsafe_telegram_user, dict) and not (
+                        is_telegram_shell and get_telegram_recovery_user() is not None
+                    ):
                         self._send_json(HTTPStatus.BAD_REQUEST, validation_result)
                         return
                 else:
@@ -342,7 +369,7 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            if debug_user_enabled():
+            if debug_user_enabled() and not is_telegram_shell:
                 user = STORE.ensure_debug_user(
                     DEFAULT_DEBUG_USER_ALIAS,
                     DEFAULT_DEBUG_USER_FIRST_NAME,
@@ -355,6 +382,22 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                     extra_headers=headers,
                 )
                 return
+
+            if is_telegram_shell:
+                recovery_user = get_telegram_recovery_user()
+                if recovery_user is not None:
+                    headers = {"Set-Cookie": self._build_session_cookie(int(recovery_user["id"]))}
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {
+                            "ok": True,
+                            "user": recovery_user,
+                            "auth_mode": "telegram_recovery",
+                            "warning": "Telegram auth payload is missing, using configured recovery user.",
+                        },
+                        extra_headers=headers,
+                    )
+                    return
 
             self._send_json(
                 HTTPStatus.UNAUTHORIZED,

@@ -12,6 +12,36 @@ from support import (
 
 
 class ServerApiTest(unittest.TestCase):
+    def provision_recovery_user(
+        self,
+        app,
+        *,
+        telegram_user_id: int = 555000444,
+        first_name: str = "Telegram",
+        last_name: str = "Recovered",
+        username: str = "telegram_recovered",
+    ) -> dict[str, object]:
+        client = JsonHttpClient(app.base_url)
+        response = client.request_json(
+            "POST",
+            "/api/session/resolve",
+            {
+                "shell": "telegram",
+                "initData": "",
+                "unsafeUser": {
+                    "id": telegram_user_id,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "username": username,
+                },
+            },
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["auth_mode"], "telegram_unsafe")
+        app.module.RECOVERY_TELEGRAM_USER_ID = response.payload["user"]["id"]
+        return response.payload["user"]
+
     def test_health_endpoint_reports_runtime_flags(self) -> None:
         with running_miniapp_server(allow_debug_user=True, dev_mode=True, bot_token="token-123") as app:
             client = JsonHttpClient(app.base_url)
@@ -76,12 +106,137 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(unsafe_response.status, 200)
             self.assertEqual(unsafe_response.payload["auth_mode"], "telegram_unsafe")
 
-            browser_response = client.request_json("POST", "/api/session/resolve", {})
+            browser_response = client.request_json("POST", "/api/session/resolve", {"shell": "browser"})
 
             self.assertEqual(browser_response.status, 200)
             self.assertEqual(browser_response.payload["auth_mode"], "debug")
             self.assertEqual(browser_response.payload["user"]["auth_source"], "debug")
             self.assertEqual(browser_response.payload["user"]["debug_alias"], "browser-default")
+
+    def test_session_resolve_telegram_shell_does_not_stick_to_debug_user(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+
+            debug_response = client.request_json("POST", "/api/session/resolve", {})
+            self.assertEqual(debug_response.status, 200)
+            self.assertEqual(debug_response.payload["auth_mode"], "debug")
+
+            telegram_response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {
+                    "shell": "telegram",
+                    "initData": "",
+                    "unsafeUser": {
+                        "id": 555000444,
+                        "first_name": "Telegram",
+                        "last_name": "Recovered",
+                        "username": "telegram_recovered",
+                    },
+                },
+            )
+
+            self.assertEqual(telegram_response.status, 200)
+            self.assertEqual(telegram_response.payload["auth_mode"], "telegram_unsafe")
+            self.assertEqual(telegram_response.payload["user"]["auth_source"], "telegram_unsafe")
+            self.assertEqual(telegram_response.payload["user"]["telegram_user_id"], 555000444)
+
+    def test_session_resolve_telegram_shell_without_payload_rejects_debug_cookie_when_no_recovery(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+
+            debug_response = client.request_json("POST", "/api/session/resolve", {"shell": "browser"})
+            self.assertEqual(debug_response.status, 200)
+            self.assertEqual(debug_response.payload["auth_mode"], "debug")
+
+            telegram_response = client.request_json("POST", "/api/session/resolve", {"shell": "telegram"})
+
+            self.assertEqual(telegram_response.status, 401)
+            self.assertIn("Open Mini App from Telegram", telegram_response.payload["reason"])
+
+    def test_session_resolve_telegram_shell_without_payload_uses_configured_recovery_user(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            recovery_user = self.provision_recovery_user(
+                app,
+                telegram_user_id=555000445,
+                username="telegram_recovery_empty",
+            )
+
+            fresh_client = JsonHttpClient(app.base_url)
+            response = fresh_client.request_json("POST", "/api/session/resolve", {"shell": "telegram"})
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["auth_mode"], "telegram_recovery")
+            self.assertEqual(response.payload["user"]["id"], recovery_user["id"])
+            self.assertEqual(response.payload["user"]["telegram_user_id"], 555000445)
+            self.assertEqual(response.payload["user"]["auth_source"], "telegram_unsafe")
+
+    def test_session_resolve_telegram_shell_prefers_recovery_user_over_existing_debug_cookie(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            recovery_user = self.provision_recovery_user(
+                app,
+                telegram_user_id=555000446,
+                username="telegram_recovery_cookie",
+            )
+
+            client = JsonHttpClient(app.base_url)
+            debug_response = client.request_json("POST", "/api/session/resolve", {"shell": "browser"})
+            self.assertEqual(debug_response.status, 200)
+            self.assertEqual(debug_response.payload["auth_mode"], "debug")
+
+            recovery_response = client.request_json("POST", "/api/session/resolve", {"shell": "telegram"})
+
+            self.assertEqual(recovery_response.status, 200)
+            self.assertEqual(recovery_response.payload["auth_mode"], "telegram_recovery")
+            self.assertEqual(recovery_response.payload["user"]["id"], recovery_user["id"])
+            self.assertEqual(recovery_response.payload["user"]["auth_source"], "telegram_unsafe")
+
+    def test_invalid_initdata_without_unsafe_user_can_use_configured_recovery_user(self) -> None:
+        with running_miniapp_server(allow_debug_user=False, bot_token="valid-test-token") as app:
+            recovery_user = self.provision_recovery_user(
+                app,
+                telegram_user_id=555000447,
+                username="telegram_recovery_invalid",
+            )
+
+            client = JsonHttpClient(app.base_url)
+            response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {
+                    "shell": "telegram",
+                    "initData": "user=%7B%22id%22%3A1%7D&auth_date=123456&hash=definitely-invalid",
+                },
+            )
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["auth_mode"], "telegram_recovery")
+            self.assertEqual(response.payload["user"]["id"], recovery_user["id"])
+
+    def test_valid_signed_initdata_takes_precedence_over_configured_recovery_user(self) -> None:
+        bot_token = "server-valid-bot-token"
+        init_data = build_signed_init_data(
+            bot_token,
+            auth_date=int(time.time()),
+            user={"id": 900101, "first_name": "Signed", "last_name": "Priority", "username": "signed_priority"},
+        )
+        with running_miniapp_server(allow_debug_user=True, bot_token=bot_token) as app:
+            self.provision_recovery_user(
+                app,
+                telegram_user_id=555000448,
+                username="telegram_recovery_signed",
+            )
+
+            client = JsonHttpClient(app.base_url)
+            response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {"shell": "telegram", "initData": init_data},
+            )
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["auth_mode"], "telegram")
+            self.assertEqual(response.payload["user"]["telegram_user_id"], 900101)
 
     def test_unsafe_telegram_user_fallback_persists_its_own_session(self) -> None:
         with running_miniapp_server(allow_debug_user=False) as app:

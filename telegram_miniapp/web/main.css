@@ -896,10 +896,6 @@ button {
   color: var(--danger-ink);
 }
 
-.add-exercise-button {
-  margin-top: -2px;
-}
-
 .set-row-editable {
   align-items: stretch;
 }
@@ -1221,26 +1217,6 @@ button {
 
 .exercise-picker-more-toggle {
   font-size: 13px;
-}
-
-.picker-footer {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.picker-footer-button {
-  min-height: 40px;
-  border-radius: 999px;
-  padding: 0 14px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.picker-footer-button-subtle {
-  background: #f4f5f7;
-  border-color: transparent;
 }
 
 .center-text {

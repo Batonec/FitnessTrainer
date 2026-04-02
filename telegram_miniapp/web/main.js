@@ -246,6 +246,7 @@ async function sendJson(url, method, payload = undefined) {
 async function resolveSession() {
   const initData = await resolveTelegramInitData();
   const payload = await postJson("/api/session/resolve", {
+    shell: tg ? "telegram" : "browser",
     initData,
     unsafeUser: getTelegramUnsafeUser(),
   });
@@ -658,10 +659,6 @@ function ensureNewWorkoutFlow() {
   if (!state.exercises.length) {
     return;
   }
-
-  if (state.workoutExercises.length === 0 && !state.selectedExerciseId) {
-    state.isAddingExercise = !getNextWorkoutPlanSuggestion();
-  }
 }
 
 function ensureEditingWorkoutStillExists() {
@@ -933,7 +930,6 @@ function focusDraftExercise(exerciseId) {
   }
 
   state.selectedExerciseId = Number(exerciseId);
-  state.isAddingExercise = false;
   state.showAllExerciseOptions = false;
   return draftExercise;
 }
@@ -1001,7 +997,6 @@ function startEditingWorkout(workoutId) {
   state.activeSetEditor = null;
   state.isAddingSet = false;
   state.isSavingWorkout = false;
-  state.isAddingExercise = false;
   state.showAllExerciseOptions = false;
   writeTextStorage(STORAGE_KEYS.tab, "new");
   persistDraft();
@@ -1230,7 +1225,6 @@ function removeDraftSet(exerciseId, setIndex) {
     state.selectedExerciseId = state.workoutExercises.at(-1)?.exerciseId ?? null;
   }
   if (!state.workoutExercises.length && !state.selectedExerciseId) {
-    state.isAddingExercise = state.exercises.length > 0;
   }
   state.activeSetEditor = null;
   state.isAddingSet = false;
@@ -1245,9 +1239,6 @@ function removeDraftExercise(exerciseId) {
   if (state.selectedExerciseId === exerciseId) {
     state.selectedExerciseId = state.workoutExercises.at(-1)?.exerciseId ?? null;
   }
-  if (!state.workoutExercises.length && !state.selectedExerciseId) {
-    state.isAddingExercise = state.exercises.length > 0;
-  }
   state.activeSetEditor = null;
   state.isAddingSet = false;
   persistDraft();
@@ -1256,7 +1247,6 @@ function removeDraftExercise(exerciseId) {
 
 function finishExercise() {
   state.isAddingSet = false;
-  state.isAddingExercise = true;
   state.showAllExerciseOptions = false;
   persistDraft();
   render();
@@ -1298,7 +1288,6 @@ function applyWorkoutPlanSuggestion() {
         : null,
     generatedFromWorkoutDate: String(plan.generated_from_workout_date || ""),
   };
-  state.isAddingExercise = false;
   state.showAllExerciseOptions = false;
   state.isAddingSet = false;
   state.activeSetEditor = null;
@@ -1374,7 +1363,6 @@ function resetDraftState() {
   hasOpenNewHistoryEntry = false;
   state.openWorkoutSwipeId = null;
   state.activeSetEditor = null;
-  state.isAddingExercise = state.exercises.length > 0;
   state.showAllExerciseOptions = false;
   state.isAddingSet = false;
   state.currentSetReps = 12;
@@ -2787,15 +2775,7 @@ function renderNewWorkoutScreen() {
         .join("")}
 
       ${
-        availableExercises.length && !state.isAddingExercise && !shouldShowPlanSuggestion
-          ? `<button class="secondary-button add-exercise-button" data-action="start-adding-exercise">${
-              state.workoutExercises.length ? "Добавить ещё упражнение" : "Добавить упражнение"
-            }</button>`
-          : ""
-      }
-
-      ${
-        state.isAddingExercise
+        availableExercises.length && !shouldShowPlanSuggestion
           ? renderExercisePicker(availableExercises)
           : ""
       }
@@ -2972,15 +2952,6 @@ function renderExercisePicker(exercises) {
           `
           : ""
       }
-      ${
-        state.workoutExercises.length || state.selectedExerciseId
-          ? `
-            <div class="picker-footer">
-              <button class="secondary-button picker-footer-button picker-footer-button-subtle" data-action="cancel-adding-exercise">Отмена</button>
-            </div>
-          `
-          : ""
-      }
     </section>
   `;
 }
@@ -3151,6 +3122,8 @@ function buildTopbarPills() {
   } else if (state.currentUser?.auth_source === "telegram") {
     pills.push('<span class="pill pill-build">TG</span>');
   } else if (state.currentUser?.auth_source === "telegram_unsafe") {
+    pills.push('<span class="pill pill-build">TG</span>');
+  } else if (state.currentUser?.auth_source === "telegram_recovery") {
     pills.push('<span class="pill pill-build">TG</span>');
   }
 

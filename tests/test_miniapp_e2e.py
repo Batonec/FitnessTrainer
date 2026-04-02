@@ -45,10 +45,26 @@ window.Telegram = {
       offClick() {}
     },
     initData: "",
-    initDataUnsafe: {}
+    initDataUnsafe: {
+      user: {
+        id: 56575086,
+        first_name: "Alexander",
+        last_name: "Makushev",
+        username: "batonec",
+        language_code: "ru"
+      }
+    }
   }
 };
 """
+
+TELEGRAM_TEST_USER = {
+    "id": 56575086,
+    "first_name": "Alexander",
+    "last_name": "Makushev",
+    "username": "batonec",
+    "language_code": "ru",
+}
 
 
 @unittest.skipUnless(HAS_PLAYWRIGHT, "Playwright is not installed")
@@ -84,6 +100,19 @@ class MiniAppE2ETest(unittest.TestCase):
     def open_app(self) -> None:
         self.page.goto(self.app.base_url, wait_until="networkidle")
         expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
+
+    def telegram_seed_client(self) -> JsonHttpClient:
+        client = JsonHttpClient(self.app.base_url)
+        client.request_json(
+            "POST",
+            "/api/session/resolve",
+            {
+                "shell": "telegram",
+                "initData": "",
+                "unsafeUser": dict(TELEGRAM_TEST_USER),
+            },
+        )
+        return client
 
     def open_new_workout(self) -> None:
         self.page.locator('[data-action="open-new-workout"]').click()
@@ -182,8 +211,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(surface).to_have_class(re.compile(r".*workout-card-surface-open.*"))
 
     def seed_progress_workouts(self) -> None:
-        client = JsonHttpClient(self.app.base_url)
-        client.request_json("POST", "/api/session/resolve", {})
+        client = self.telegram_seed_client()
         client.request_json(
             "POST",
             "/api/workouts",
@@ -231,8 +259,7 @@ class MiniAppE2ETest(unittest.TestCase):
         weight: float,
         reps: int,
     ) -> dict:
-        client = JsonHttpClient(self.app.base_url)
-        client.request_json("POST", "/api/session/resolve", {})
+        client = self.telegram_seed_client()
         response = client.request_json(
             "POST",
             "/api/workouts",
@@ -259,8 +286,7 @@ class MiniAppE2ETest(unittest.TestCase):
             )
 
     def seed_next_workout_plan_source(self) -> None:
-        client = JsonHttpClient(self.app.base_url)
-        client.request_json("POST", "/api/session/resolve", {})
+        client = self.telegram_seed_client()
         client.request_json(
             "POST",
             "/api/workouts",
@@ -335,8 +361,7 @@ class MiniAppE2ETest(unittest.TestCase):
         )
 
     def seed_popular_exercise_picker_history(self) -> None:
-        client = JsonHttpClient(self.app.base_url)
-        client.request_json("POST", "/api/session/resolve", {})
+        client = self.telegram_seed_client()
 
         base_exercises = [
             (8, "Жим ногами", 120, 15),
@@ -613,7 +638,6 @@ class MiniAppE2ETest(unittest.TestCase):
         self.select_exercise_by_name("Жим ногами")
         self.add_default_set()
 
-        self.page.locator('[data-action="start-adding-exercise"]').click()
         self.select_exercise_by_name("Тяга верт.")
         self.add_default_set()
 
