@@ -254,8 +254,26 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             if payload is None:
                 return
 
+            unsafe_telegram_user = payload.get("unsafeUser")
             current_user, current_headers = self._resolve_current_user()
-            if current_user is not None and not payload.get("initData"):
+            has_init_data = bool(payload.get("initData"))
+
+            if not has_init_data and not isinstance(unsafe_telegram_user, dict) and debug_user_enabled():
+                if current_user is None or current_user.get("auth_source") != "debug":
+                    user = STORE.ensure_debug_user(
+                        DEFAULT_DEBUG_USER_ALIAS,
+                        DEFAULT_DEBUG_USER_FIRST_NAME,
+                        DEFAULT_DEBUG_USER_LAST_NAME,
+                    )
+                    headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"ok": True, "user": user, "auth_mode": "debug"},
+                        extra_headers=headers,
+                    )
+                    return
+
+            if current_user is not None and not has_init_data:
                 self._send_json(
                     HTTPStatus.OK,
                     {"ok": True, "user": current_user},
@@ -264,7 +282,6 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 return
 
             init_data = str(payload.get("initData", ""))
-            unsafe_telegram_user = payload.get("unsafeUser")
             validation_result = None
             if init_data:
                 validation_result = validate_init_data(init_data, BOT_TOKEN)

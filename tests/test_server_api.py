@@ -56,6 +56,33 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(first_response.payload["user"]["id"], second_response.payload["user"]["id"])
             self.assertNotIn("auth_mode", second_response.payload)
 
+    def test_session_resolve_prefers_debug_user_over_existing_non_debug_cookie_in_browser_mode(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+
+            unsafe_response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {
+                    "initData": "",
+                    "unsafeUser": {
+                        "id": 555000333,
+                        "first_name": "Telegram",
+                        "last_name": "Session",
+                        "username": "telegram_session",
+                    },
+                },
+            )
+            self.assertEqual(unsafe_response.status, 200)
+            self.assertEqual(unsafe_response.payload["auth_mode"], "telegram_unsafe")
+
+            browser_response = client.request_json("POST", "/api/session/resolve", {})
+
+            self.assertEqual(browser_response.status, 200)
+            self.assertEqual(browser_response.payload["auth_mode"], "debug")
+            self.assertEqual(browser_response.payload["user"]["auth_source"], "debug")
+            self.assertEqual(browser_response.payload["user"]["debug_alias"], "browser-default")
+
     def test_unsafe_telegram_user_fallback_persists_its_own_session(self) -> None:
         with running_miniapp_server(allow_debug_user=False) as app:
             client = JsonHttpClient(app.base_url)

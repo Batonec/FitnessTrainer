@@ -41,6 +41,7 @@ const state = {
   exercises: [],
   workoutDate: getLocalTodayIso(),
   customWorkouts: sortWorkouts(readJsonStorage(STORAGE_KEYS.customWorkouts, [])),
+  appliedWorkoutPlan: null,
   selectedExerciseId: null,
   workoutExercises: [],
   editingWorkoutId: null,
@@ -357,7 +358,10 @@ function handleClick(event) {
       deleteWorkout(Number(actionTarget.dataset.workoutId));
       break;
     case "continue-exercise":
-      selectExercise(Number(actionTarget.dataset.exerciseId));
+      startAddingSetForExercise(Number(actionTarget.dataset.exerciseId));
+      break;
+    case "quick-standard-set":
+      addStandardSetForExercise(Number(actionTarget.dataset.exerciseId));
       break;
     case "edit-draft-set":
       startEditingDraftSet(
@@ -370,6 +374,9 @@ function handleClick(event) {
       break;
     case "remove-draft-exercise":
       removeDraftExercise(Number(actionTarget.dataset.exerciseId));
+      break;
+    case "apply-workout-plan":
+      applyWorkoutPlanSuggestion();
       break;
     case "start-adding-exercise":
       state.isAddingExercise = true;
@@ -576,10 +583,12 @@ function hydrateDraft() {
     typeof draft.editingWorkoutClientId === "string" && draft.editingWorkoutClientId.trim()
       ? draft.editingWorkoutClientId.trim()
       : null;
+  state.appliedWorkoutPlan = normalizeAppliedWorkoutPlan(draft.appliedWorkoutPlan);
 }
 
 function persistDraft() {
   if (!state.selectedExerciseId && state.workoutExercises.length === 0) {
+    state.appliedWorkoutPlan = null;
     localStorage.removeItem(STORAGE_KEYS.draft);
     return;
   }
@@ -590,7 +599,33 @@ function persistDraft() {
     workoutDate: state.workoutDate,
     editingWorkoutId: state.editingWorkoutId,
     editingWorkoutClientId: state.editingWorkoutClientId,
+    appliedWorkoutPlan: state.appliedWorkoutPlan,
   });
+}
+
+function normalizeAppliedWorkoutPlan(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const generatedFromWorkoutId = Number(value.generatedFromWorkoutId);
+  const generatedFromWorkoutDate = String(value.generatedFromWorkoutDate || "").trim();
+  const strategy = String(value.strategy || "").trim();
+  const source = String(value.source || "").trim();
+
+  if (!strategy || !source || !/^\d{4}-\d{2}-\d{2}$/.test(generatedFromWorkoutDate)) {
+    return null;
+  }
+
+  return {
+    source,
+    strategy,
+    generatedFromWorkoutId:
+      Number.isFinite(generatedFromWorkoutId) && generatedFromWorkoutId > 0
+        ? generatedFromWorkoutId
+        : null,
+    generatedFromWorkoutDate,
+  };
 }
 
 function normalizeDraftWorkoutExercises(value) {
@@ -624,6 +659,13 @@ function ensureDraftExerciseStillExists() {
   const exists = state.exercises.some((exercise) => exercise.id === state.selectedExerciseId);
   if (!exists) {
     state.selectedExerciseId = null;
+    persistDraft();
+    return;
+  }
+
+  if (!state.workoutExercises.some((exercise) => exercise.exerciseId === state.selectedExerciseId)) {
+    ensureDraftExerciseEntry(state.selectedExerciseId);
+    persistDraft();
   }
 }
 
@@ -633,7 +675,7 @@ function ensureNewWorkoutFlow() {
   }
 
   if (state.workoutExercises.length === 0 && !state.selectedExerciseId) {
-    state.isAddingExercise = true;
+    state.isAddingExercise = !getNextWorkoutPlanSuggestion();
   }
 }
 
@@ -655,13 +697,19 @@ function hasWorkoutDraft() {
   return state.workoutExercises.length > 0 || state.selectedExerciseId !== null;
 }
 
-function countDraftExercises() {
-  const selectedExercise = getSelectedExercise();
-  const selectedExistsInDraft =
-    selectedExercise &&
-    state.workoutExercises.some((exercise) => exercise.exerciseId === selectedExercise.id);
+function hasAppliedWorkoutPlan() {
+  return Boolean(state.appliedWorkoutPlan?.strategy);
+}
 
-  return state.workoutExercises.length + (selectedExercise && !selectedExistsInDraft ? 1 : 0);
+function getNextWorkoutPlanSuggestion(workouts = getAllWorkouts()) {
+  if (state.editingWorkoutId) {
+    return null;
+  }
+  return buildNextWorkoutPlanSuggestion(workouts);
+}
+
+function countDraftExercises() {
+  return state.workoutExercises.length;
 }
 
 function getAllWorkouts() {
@@ -692,13 +740,44 @@ function sortWorkouts(workouts) {
 }
 
 function getSelectedExercise() {
-  return state.exercises.find((exercise) => exercise.id === state.selectedExerciseId) || null;
+  return getExerciseDefinition(state.selectedExerciseId);
 }
 
 function getCurrentWorkoutExercise() {
   return state.workoutExercises.find(
     (exercise) => exercise.exerciseId === state.selectedExerciseId
   ) || null;
+}
+
+function getExerciseDefinition(exerciseId) {
+  return state.exercises.find((exercise) => exercise.id === exerciseId) || null;
+}
+
+function ensureDraftExerciseEntry(exerciseId) {
+  if (!Number.isFinite(Number(exerciseId)) || Number(exerciseId) <= 0) {
+    return null;
+  }
+
+  const normalizedExerciseId = Number(exerciseId);
+  const existingExercise = state.workoutExercises.find(
+    (exercise) => exercise.exerciseId === normalizedExerciseId
+  );
+  if (existingExercise) {
+    return existingExercise;
+  }
+
+  const exerciseDefinition = getExerciseDefinition(normalizedExerciseId);
+  if (!exerciseDefinition) {
+    return null;
+  }
+
+  const nextExercise = {
+    exerciseId: normalizedExerciseId,
+    exerciseName: exerciseDefinition.name,
+    sets: [],
+  };
+  state.workoutExercises = [...state.workoutExercises, nextExercise];
+  return nextExercise;
 }
 
 function getAvailableExercises() {
@@ -749,9 +828,36 @@ function ensureSelectedProgressExercise() {
   writeTextStorage(STORAGE_KEYS.progressExercise, String(progressExercises[0].id));
 }
 
-function selectExercise(exerciseId) {
-  state.selectedExerciseId = exerciseId;
+function focusDraftExercise(exerciseId) {
+  const draftExercise = ensureDraftExerciseEntry(exerciseId);
+  if (!draftExercise) {
+    return null;
+  }
+
+  state.selectedExerciseId = Number(exerciseId);
   state.isAddingExercise = false;
+  return draftExercise;
+}
+
+function selectExercise(exerciseId, { openSetEditor = true } = {}) {
+  const selectedExercise = getExerciseDefinition(Number(exerciseId));
+  if (!selectedExercise) {
+    return;
+  }
+
+  focusDraftExercise(selectedExercise.id);
+  if (openSetEditor) {
+    state.currentSetReps = 12;
+    state.currentSetWeight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
+    state.activeSetEditor = {
+      exerciseId: selectedExercise.id,
+      setIndex: null,
+    };
+    state.isAddingSet = true;
+  } else {
+    state.activeSetEditor = null;
+    state.isAddingSet = false;
+  }
   persistDraft();
   render();
 }
@@ -785,8 +891,9 @@ function startEditingWorkout(workoutId) {
       reps: Number(workoutSet.reps) || 1,
       weight: Number(workoutSet.weight) || 0,
       notes: workoutSet.notes ?? null,
-    })),
+      })),
   }));
+  state.appliedWorkoutPlan = null;
   state.editingWorkoutId = workout.id;
   state.editingWorkoutClientId =
     typeof workout.client_id === "string" && workout.client_id.trim()
@@ -852,6 +959,16 @@ function startAddingSet() {
     return;
   }
 
+  startAddingSetForExercise(selectedExercise.id);
+}
+
+function startAddingSetForExercise(exerciseId) {
+  const selectedExercise = getExerciseDefinition(Number(exerciseId));
+  if (!selectedExercise) {
+    return;
+  }
+
+  focusDraftExercise(selectedExercise.id);
   state.currentSetReps = 12;
   state.currentSetWeight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
   state.activeSetEditor = {
@@ -859,6 +976,7 @@ function startAddingSet() {
     setIndex: null,
   };
   state.isAddingSet = true;
+  persistDraft();
   render();
 }
 
@@ -874,8 +992,18 @@ function addStandardSet() {
     return;
   }
 
+  addStandardSetForExercise(selectedExercise.id);
+}
+
+function addStandardSetForExercise(exerciseId) {
+  const selectedExercise = getExerciseDefinition(Number(exerciseId));
+  if (!selectedExercise) {
+    return;
+  }
+
+  focusDraftExercise(selectedExercise.id);
   const weight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
-  addSetToCurrentExercise({
+  addSetToExercise(selectedExercise.id, {
     reps: 12,
     weight,
     notes: null,
@@ -894,20 +1022,22 @@ function applySet() {
       state.activeSetEditor.setIndex,
       nextSet
     );
+    state.selectedExerciseId = state.activeSetEditor.exerciseId;
   } else {
-    addSetToCurrentExercise(nextSet);
+    addSetToExercise(state.activeSetEditor?.exerciseId, nextSet);
   }
   state.activeSetEditor = null;
   state.isAddingSet = false;
   render();
 }
 
-function addSetToCurrentExercise(setData) {
-  const selectedExercise = getSelectedExercise();
+function addSetToExercise(exerciseId, setData) {
+  const selectedExercise = getExerciseDefinition(Number(exerciseId));
   if (!selectedExercise) {
     return;
   }
 
+  focusDraftExercise(selectedExercise.id);
   const existingIndex = state.workoutExercises.findIndex(
     (exercise) => exercise.exerciseId === selectedExercise.id
   );
@@ -944,8 +1074,7 @@ function startEditingDraftSet(exerciseId, setIndex) {
     return;
   }
 
-  state.selectedExerciseId = exerciseId;
-  state.isAddingExercise = false;
+  focusDraftExercise(exerciseId);
   state.currentSetReps = Number(workoutSet.reps) || 1;
   state.currentSetWeight = Number(workoutSet.weight) || 0;
   state.activeSetEditor = { exerciseId, setIndex };
@@ -998,7 +1127,7 @@ function removeDraftSet(exerciseId, setIndex) {
 
   state.workoutExercises = nextExercises;
   if (!state.workoutExercises.some((exercise) => exercise.exerciseId === state.selectedExerciseId)) {
-    state.selectedExerciseId = null;
+    state.selectedExerciseId = state.workoutExercises.at(-1)?.exerciseId ?? null;
   }
   if (!state.workoutExercises.length && !state.selectedExerciseId) {
     state.isAddingExercise = state.exercises.length > 0;
@@ -1014,7 +1143,7 @@ function removeDraftExercise(exerciseId) {
     (exercise) => exercise.exerciseId !== exerciseId
   );
   if (state.selectedExerciseId === exerciseId) {
-    state.selectedExerciseId = null;
+    state.selectedExerciseId = state.workoutExercises.at(-1)?.exerciseId ?? null;
   }
   if (!state.workoutExercises.length && !state.selectedExerciseId) {
     state.isAddingExercise = state.exercises.length > 0;
@@ -1030,6 +1159,50 @@ function finishExercise() {
   state.isAddingExercise = true;
   persistDraft();
   render();
+}
+
+function buildDraftExercisesFromPlan(plan) {
+  return (Array.isArray(plan?.data?.exercises) ? plan.data.exercises : []).map((exercise) => ({
+    exerciseId: Number(exercise.exercise_id) || 0,
+    exerciseName: String(exercise.name || "").trim(),
+    sets: Array.isArray(exercise.sets)
+      ? exercise.sets.map((set) => ({
+          reps: Math.max(1, Number(set.reps) || 1),
+          weight: Math.max(0, Number(set.weight) || 0),
+          notes: typeof set.notes === "string" && set.notes.trim() ? set.notes.trim() : null,
+        }))
+      : [],
+  }));
+}
+
+function applyWorkoutPlanSuggestion() {
+  const plan = getNextWorkoutPlanSuggestion();
+  if (!plan) {
+    showFlash("План следующей тренировки пока недоступен");
+    return;
+  }
+
+  state.selectedExerciseId = null;
+  state.workoutExercises = buildDraftExercisesFromPlan(plan);
+  state.workoutDate =
+    typeof plan.workout_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(plan.workout_date)
+      ? plan.workout_date
+      : getLocalTodayIso();
+  state.appliedWorkoutPlan = {
+    source: String(plan.source || "heuristic"),
+    strategy: String(plan.strategy || "manual"),
+    generatedFromWorkoutId:
+      Number.isFinite(Number(plan.generated_from_workout_id)) && Number(plan.generated_from_workout_id) > 0
+        ? Number(plan.generated_from_workout_id)
+        : null,
+    generatedFromWorkoutDate: String(plan.generated_from_workout_date || ""),
+  };
+  state.isAddingExercise = false;
+  state.isAddingSet = false;
+  state.activeSetEditor = null;
+  persistDraft();
+  render();
+  showFlash("Черновик заполнен по плану");
 }
 
 async function finishWorkout() {
@@ -1090,6 +1263,7 @@ async function finishWorkout() {
 
 function resetDraftState() {
   state.workoutDate = getLocalTodayIso();
+  state.appliedWorkoutPlan = null;
   state.selectedExerciseId = null;
   state.workoutExercises = [];
   state.editingWorkoutId = null;
@@ -1891,15 +2065,115 @@ function renderCurrentScreen() {
 
 function renderTrainingsScreen() {
   const workouts = getAllWorkouts();
+  const nextWorkoutPlan = buildNextWorkoutPlanSuggestion(workouts);
   if (!workouts.length) {
     return renderEmptyState("Пока нет тренировок");
   }
 
   return `
     <section class="stack">
+      ${nextWorkoutPlan ? renderNextWorkoutPlanCard(nextWorkoutPlan) : ""}
       ${workouts.map((workout) => renderWorkoutCard(workout)).join("")}
       <a class="debug-link" href="/stub.html">Открыть старую debug-заглушку</a>
     </section>
+  `;
+}
+
+function buildNextWorkoutPlanSuggestion(workouts) {
+  if (!Array.isArray(workouts) || !workouts.length) {
+    return null;
+  }
+
+  const latestWorkout = workouts[0];
+  const exercises = Array.isArray(latestWorkout?.data?.exercises) ? latestWorkout.data.exercises : [];
+  if (!exercises.length) {
+    return null;
+  }
+
+  const plannedExercises = exercises.map((exercise) => ({
+    exercise_id: exercise.exercise_id,
+    name: exercise.name,
+    sets: Array.isArray(exercise.sets)
+      ? exercise.sets.map((set, index) => ({
+          reps: Math.max(1, (Number(set.reps) || 0) + 1),
+          weight: Number(set.weight) || 0,
+          notes: typeof set.notes === "string" && set.notes.trim() ? set.notes.trim() : null,
+          set_index: index + 1,
+        }))
+      : [],
+  }));
+
+  return {
+    source: "heuristic",
+    strategy: "last_workout_plus_one_rep_v1",
+    generated_from_workout_id: latestWorkout.id,
+    generated_from_workout_date: latestWorkout.workout_date,
+    workout_date: getLocalTodayIso(),
+    explanation: "Берём последнюю тренировку и добавляем по одному повтору в каждом сете.",
+    data: {
+      focus: latestWorkout.data?.focus ?? null,
+      notes: latestWorkout.data?.notes ?? null,
+      load_type: latestWorkout.data?.load_type ?? inferLoadTypeFromApiExercises(plannedExercises),
+      exercises: plannedExercises,
+    },
+  };
+}
+
+function inferLoadTypeFromApiExercises(exercises) {
+  const draftExercises = (Array.isArray(exercises) ? exercises : []).map((exercise) => ({
+    exerciseId: Number(exercise.exercise_id) || 0,
+    exerciseName: String(exercise.name || ""),
+    sets: Array.isArray(exercise.sets)
+      ? exercise.sets.map((set) => ({
+          reps: Math.max(1, Number(set.reps) || 1),
+          weight: Math.max(0, Number(set.weight) || 0),
+          notes: set.notes ?? null,
+        }))
+      : [],
+  }));
+
+  return inferLoadType(draftExercises);
+}
+
+function renderNextWorkoutPlanCard(plan) {
+  return `
+    <section class="card next-plan-card">
+      <div class="next-plan-head">
+        <div class="next-plan-copy">
+          <div class="next-plan-kicker">План следующей тренировки</div>
+          <div class="next-plan-subtitle">
+            Основано на тренировке от ${escapeHtml(formatLongDate(plan.generated_from_workout_date))}.
+          </div>
+        </div>
+        <div class="next-plan-badges">
+          <span class="next-plan-rule">+1 повт/сет</span>
+          ${renderLoadBadge(plan.data.load_type)}
+        </div>
+      </div>
+      <div class="next-plan-list">
+        ${plan.data.exercises.map((exercise) => renderNextPlanExerciseRow(exercise)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderNextPlanExerciseRow(exercise) {
+  const compactSets = summarizeExerciseSets(exercise.sets);
+  return `
+    <article class="next-plan-row">
+      <div class="next-plan-row-inline">
+        <span class="next-plan-row-name">${escapeHtml(exercise.name)}</span>
+        <span class="next-plan-row-summary">
+          ${compactSets.parts
+            .map(
+              (part) => `
+                <span class="next-plan-row-part">${escapeHtml(part)}</span>
+              `
+            )
+            .join("")}
+        </span>
+      </div>
+    </article>
   `;
 }
 
@@ -2344,17 +2618,24 @@ function getRangeDescription(rangeKey) {
 }
 
 function renderNewWorkoutScreen() {
-  const selectedExercise = getSelectedExercise();
-  const currentExercise = getCurrentWorkoutExercise();
   const availableExercises = getAvailableExercises();
-  const allWorkouts = getAllWorkouts();
+  const nextWorkoutPlan = getNextWorkoutPlanSuggestion(getAllWorkouts());
+  const shouldShowPlanSuggestion =
+    !state.editingWorkoutId &&
+    !hasWorkoutDraft() &&
+    !state.isAddingExercise &&
+    Boolean(nextWorkoutPlan);
   const draftExercisesCount = countDraftExercises();
-  const canUseStandard =
-    selectedExercise && hasValidWorkoutData(allWorkouts, selectedExercise.id);
 
   return `
     <section class="stack">
       ${renderWorkoutMetaCard()}
+
+      ${
+        shouldShowPlanSuggestion && nextWorkoutPlan
+          ? renderNewWorkoutPlanSuggestionCard(nextWorkoutPlan)
+          : ""
+      }
 
       ${
         hasWorkoutDraft()
@@ -2362,20 +2643,20 @@ function renderNewWorkoutScreen() {
           : ""
       }
 
-      ${state.workoutExercises.map((exercise) => renderDraftExerciseCard(exercise)).join("")}
+      ${state.workoutExercises
+        .map((exercise) =>
+          renderDraftExerciseCard(exercise, {
+            isSelected: exercise.exerciseId === state.selectedExerciseId,
+            canUseStandard: hasValidWorkoutData(getAllWorkouts(), exercise.exerciseId),
+          })
+        )
+        .join("")}
 
       ${
-        selectedExercise && !currentExercise
-          ? renderCurrentExerciseCard(selectedExercise.name)
-          : ""
-      }
-
-      ${
-        !selectedExercise &&
-        state.workoutExercises.length > 0 &&
-        !state.isAddingExercise &&
-        availableExercises.length
-          ? `<button class="primary-button" data-action="start-adding-exercise">Добавить упражнение</button>`
+        availableExercises.length && !state.isAddingExercise
+          ? `<button class="secondary-button add-exercise-button" data-action="start-adding-exercise">${
+              state.workoutExercises.length ? "Добавить ещё упражнение" : "Добавить упражнение"
+            }</button>`
           : ""
       }
 
@@ -2386,32 +2667,7 @@ function renderNewWorkoutScreen() {
       }
 
       ${
-        selectedExercise && !state.isAddingSet && !state.isAddingExercise
-          ? `
-            <div class="button-row">
-              <button class="secondary-button" data-action="start-adding-set">Добавить сет</button>
-              ${
-                canUseStandard
-                  ? `<button class="primary-button" data-action="add-standard-set">Стандарт</button>`
-                  : ""
-              }
-            </div>
-          `
-          : ""
-      }
-
-      ${
-        currentExercise && currentExercise.sets.length
-          ? `
-            <div class="center-text">
-              <button class="text-button" data-action="finish-exercise">Новое упражнение</button>
-            </div>
-          `
-          : ""
-      }
-
-      ${
-        !availableExercises.length && !selectedExercise && state.workoutExercises.length
+        !availableExercises.length && state.workoutExercises.length
           ? `<p class="muted-note">Все упражнения из локальной базы уже добавлены в эту тренировку.</p>`
           : ""
       }
@@ -2421,15 +2677,24 @@ function renderNewWorkoutScreen() {
 
 function renderDraftResumeCard(draftExercisesCount, totalExercisesCount) {
   const remainingExercisesCount = Math.max(0, totalExercisesCount - draftExercisesCount);
+  const planDate = state.appliedWorkoutPlan?.generatedFromWorkoutDate
+    ? formatLongDate(state.appliedWorkoutPlan.generatedFromWorkoutDate)
+    : null;
   return `
     <section class="card draft-banner">
       <div class="draft-banner-title">${
-        state.editingWorkoutId ? "Редактирование тренировки" : "Восстановлен черновик тренировки"
+        state.editingWorkoutId
+          ? "Редактирование тренировки"
+          : hasAppliedWorkoutPlan()
+            ? "Черновик по плану следующей тренировки"
+            : "Восстановлен черновик тренировки"
       }</div>
       <div class="draft-banner-text">
         ${
           state.editingWorkoutId
             ? `Открыта тренировка от ${formatLongDate(state.workoutDate)}. Сейчас в ней ${draftExercisesCount} упражнений, добавить можно ещё ${remainingExercisesCount}.`
+            : hasAppliedWorkoutPlan() && planDate
+              ? `Черновик собран по плану на основе тренировки от ${planDate}. Уже добавлено ${draftExercisesCount} упражнений, можно скорректировать повторы, веса или состав.`
             : `Уже добавлено ${draftExercisesCount} из ${totalExercisesCount} упражнений. Доступно для выбора ещё ${remainingExercisesCount}.`
         }
       </div>
@@ -2442,11 +2707,33 @@ function renderDraftResumeCard(draftExercisesCount, totalExercisesCount) {
   `;
 }
 
-function renderDraftExerciseCard(exercise) {
+function renderNewWorkoutPlanSuggestionCard(plan) {
   return `
-    <article class="surface-card exercise-card">
+    <section class="card draft-banner plan-start-banner">
+      <div class="draft-banner-title">План следующей тренировки</div>
+      <div class="draft-banner-text">
+        Основано на тренировке от ${escapeHtml(formatLongDate(plan.generated_from_workout_date))}. 
+        Текущий алгоритм просто добавляет по одному повтору к каждому сету.
+      </div>
+      <div class="next-plan-list next-plan-list-start">
+        ${plan.data.exercises.map((exercise) => renderNextPlanExerciseRow(exercise)).join("")}
+      </div>
+      <div class="plan-start-actions">
+        <button class="primary-button" data-action="apply-workout-plan">Заполнить по плану</button>
+        <button class="text-button" data-action="start-adding-exercise">Собрать вручную</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard = false } = {}) {
+  return `
+    <article class="surface-card exercise-card ${isSelected ? "exercise-card-active" : ""}">
       <div class="draft-exercise-head">
-        <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
+        <div class="exercise-title-row">
+          <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
+          ${isSelected ? `<span class="exercise-focus-pill">Сейчас</span>` : ""}
+        </div>
         <div class="draft-exercise-actions">
           <button
             class="draft-inline-button"
@@ -2455,6 +2742,19 @@ function renderDraftExerciseCard(exercise) {
           >
             + Сет
           </button>
+          ${
+            canUseStandard
+              ? `
+                <button
+                  class="draft-inline-button draft-inline-button-secondary"
+                  data-action="quick-standard-set"
+                  data-exercise-id="${exercise.exerciseId}"
+                >
+                  Стандарт
+                </button>
+              `
+              : ""
+          }
           <button
             class="draft-inline-button draft-inline-button-danger"
             data-action="remove-draft-exercise"
@@ -2497,7 +2797,7 @@ function renderDraftExerciseCard(exercise) {
                 .join("")}
             </div>
           `
-          : `<div class="exercise-empty">Сетов пока нет</div>`
+          : `<div class="exercise-empty">Добавь первый сет, потом можно будет чередовать это упражнение с другими.</div>`
       }
     </article>
   `;
@@ -2538,7 +2838,7 @@ function renderExercisePicker(exercises) {
       <div class="exercise-picker-title">Выберите упражнение</div>
       ${
         state.workoutExercises.length
-          ? `<p class="muted-note">В этом черновике уже есть ${state.workoutExercises.length} упражнений, поэтому список ниже показывает только оставшиеся.</p>`
+          ? `<p class="muted-note">В этом черновике уже есть ${state.workoutExercises.length} упражнений. Можно добавить ещё одно и потом чередовать сеты между карточками.</p>`
           : ""
       }
       ${

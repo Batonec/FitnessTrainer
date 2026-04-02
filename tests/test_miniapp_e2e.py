@@ -55,8 +55,6 @@ window.Telegram = {
 class MiniAppE2ETest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server_context = running_miniapp_server(static_dir=WEB_DIR, allow_debug_user=True)
-        cls.app = cls.server_context.__enter__()
         cls.playwright = sync_playwright().start()
         cls.browser = cls.playwright.chromium.launch()
 
@@ -64,9 +62,10 @@ class MiniAppE2ETest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.browser.close()
         cls.playwright.stop()
-        cls.server_context.__exit__(None, None, None)
 
     def setUp(self) -> None:
+        self.server_context = running_miniapp_server(static_dir=WEB_DIR, allow_debug_user=True)
+        self.app = self.server_context.__enter__()
         self.context = self.browser.new_context(locale="ru-RU")
         self.page = self.context.new_page()
         self.page.route(
@@ -80,6 +79,7 @@ class MiniAppE2ETest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.context.close()
+        self.server_context.__exit__(None, None, None)
 
     def open_app(self) -> None:
         self.page.goto(self.app.base_url, wait_until="networkidle")
@@ -88,9 +88,17 @@ class MiniAppE2ETest(unittest.TestCase):
     def open_new_workout(self) -> None:
         self.page.locator('[data-action="open-new-workout"]').click()
         expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Новая тренировка")
+        if self.page.locator(".plan-start-banner").count():
+            self.page.locator(".plan-start-banner [data-action=\"start-adding-exercise\"]").click()
+
+    def open_new_workout_with_plan(self) -> None:
+        self.page.locator('[data-action="open-new-workout"]').click()
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Новая тренировка")
+        expect(self.page.locator(".plan-start-banner")).to_be_visible()
 
     def add_default_set(self) -> None:
-        self.page.locator('[data-action="start-adding-set"]').click()
+        if self.page.locator(".modal-card").count() == 0:
+            self.page.locator('[data-action="start-adding-set"]').click()
         self.page.locator('[data-action="set-apply"]').click()
 
     def reveal_workout_actions(self, card_locator, *, vertical_shift: float = 0) -> None:
@@ -228,6 +236,82 @@ class MiniAppE2ETest(unittest.TestCase):
                 reps=10 + (index % 4),
             )
 
+    def seed_next_workout_plan_source(self) -> None:
+        client = JsonHttpClient(self.app.base_url)
+        client.request_json("POST", "/api/session/resolve", {})
+        client.request_json(
+            "POST",
+            "/api/workouts",
+            {
+                "client_id": "older-plan-seed",
+                "workout_date": "2026-03-21",
+                "plan_id": None,
+                "data": {
+                    "notes": None,
+                    "load_type": "light",
+                    "exercises": [
+                        {
+                            "exercise_id": 401,
+                            "name": "Старый план",
+                            "sets": [
+                                {
+                                    "reps": 8,
+                                    "weight": 50,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+        client.request_json(
+            "POST",
+            "/api/workouts",
+            {
+                "client_id": "latest-plan-seed",
+                "workout_date": "2026-03-28",
+                "plan_id": None,
+                "data": {
+                    "notes": None,
+                    "load_type": "medium",
+                    "exercises": [
+                        {
+                            "exercise_id": 11,
+                            "name": "Жим ногами",
+                            "sets": [
+                                {
+                                    "reps": 15,
+                                    "weight": 80,
+                                },
+                                {
+                                    "reps": 15,
+                                    "weight": 80,
+                                },
+                                {
+                                    "reps": 15,
+                                    "weight": 80,
+                                },
+                            ],
+                        },
+                        {
+                            "exercise_id": 12,
+                            "name": "Тяга верт.",
+                            "sets": [
+                                {
+                                    "reps": 12,
+                                    "weight": 60,
+                                },
+                                {
+                                    "reps": 10,
+                                    "weight": 65,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        )
+
     def test_can_create_two_same_day_workouts_and_latest_one_is_first(self) -> None:
         self.open_app()
         self.open_new_workout()
@@ -275,6 +359,45 @@ class MiniAppE2ETest(unittest.TestCase):
         target_card = self.page.locator(".workout-swipe-card").filter(has_text="Диагональный свайп")
         self.reveal_workout_actions(target_card, vertical_shift=24)
         expect(target_card.locator('[data-action="edit-workout"]')).to_be_visible()
+
+    def test_trainings_screen_shows_next_workout_plan_based_on_latest_workout(self) -> None:
+        self.seed_next_workout_plan_source()
+
+        self.open_app()
+
+        plan_card = self.page.locator(".next-plan-card")
+        expect(plan_card).to_contain_text("План следующей тренировки")
+        expect(plan_card).to_contain_text("Основано на тренировке от 28 марта 2026")
+        expect(plan_card).to_contain_text("+1 повт/сет")
+        expect(plan_card).to_contain_text("Жим ногами")
+        expect(plan_card).to_contain_text("80кг ×16×3")
+        expect(plan_card).to_contain_text("Тяга верт.")
+        expect(plan_card).to_contain_text("60кг ×13")
+        expect(plan_card).to_contain_text("65кг ×11")
+        expect(plan_card).not_to_contain_text("Старый план")
+
+    def test_new_workout_can_start_from_next_workout_plan(self) -> None:
+        self.seed_next_workout_plan_source()
+        self.open_app()
+
+        self.open_new_workout_with_plan()
+
+        plan_card = self.page.locator(".plan-start-banner")
+        expect(plan_card).to_contain_text("План следующей тренировки")
+        expect(plan_card).to_contain_text("Основано на тренировке от 28 марта 2026")
+        expect(plan_card).to_contain_text("Жим ногами")
+        expect(plan_card).to_contain_text("80кг ×16×3")
+
+        self.page.locator('[data-action="apply-workout-plan"]').click()
+
+        expect(self.page.locator(".draft-banner")).to_contain_text("Черновик по плану следующей тренировки")
+        expect(self.page.locator(".draft-banner")).to_contain_text("28 марта 2026")
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_contain_text("80 кг × 16")
+        expect(self.page.locator(".exercise-card").filter(has_text="Тяга верт.")).to_contain_text("65 кг × 11")
+
+        self.page.locator('[data-action="close-new-workout"]').click()
+        self.open_new_workout()
+        expect(self.page.locator(".draft-banner")).to_contain_text("Черновик по плану следующей тренировки")
 
     def test_telegram_shell_requests_fullscreen_and_disables_vertical_swipes(self) -> None:
         self.open_app()
@@ -330,8 +453,8 @@ class MiniAppE2ETest(unittest.TestCase):
         self.page.reload(wait_until="networkidle")
 
         expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
-        self.page.locator('[data-action="finish-exercise"]').click()
-        expect(self.page.locator(".exercise-picker")).to_contain_text("показывает только оставшиеся")
+        self.page.locator('[data-action="start-adding-exercise"]').click()
+        expect(self.page.locator(".exercise-picker")).to_contain_text("чередовать сеты между карточками")
 
         self.page.locator('[data-action="reset-workout-draft"]').first.click()
 
@@ -358,6 +481,31 @@ class MiniAppE2ETest(unittest.TestCase):
 
         expect(self.page.locator(".draft-banner")).to_contain_text("Восстановлен черновик тренировки")
         expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+
+    def test_new_workout_supports_alternating_superset_sets(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        self.add_default_set()
+
+        self.page.locator('[data-action="start-adding-exercise"]').click()
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Тяга верт.").click()
+        self.add_default_set()
+
+        leg_press_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        pull_down_card = self.page.locator(".exercise-card").filter(has_text="Тяга верт.")
+
+        expect(leg_press_card.locator(".set-row")).to_have_count(1)
+        expect(pull_down_card.locator(".set-row")).to_have_count(1)
+
+        leg_press_card.locator('[data-action="continue-exercise"]').click()
+        self.page.locator('[data-action="set-apply"]').click()
+
+        expect(leg_press_card.locator(".set-row")).to_have_count(2)
+        expect(leg_press_card).to_contain_text("Сет 2")
+        expect(leg_press_card).to_contain_text("Сейчас")
+        expect(pull_down_card.locator(".set-row")).to_have_count(1)
 
     def test_returning_from_new_restores_trainings_scroll_position(self) -> None:
         self.seed_workout_history()
