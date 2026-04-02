@@ -34,7 +34,7 @@ body {
 
 body {
   padding:
-    env(safe-area-inset-top)
+    0
     0
     calc(84px + env(safe-area-inset-bottom))
     0;
@@ -66,10 +66,10 @@ button {
   position: sticky;
   top: 0;
   z-index: 30;
-  padding: 6px 12px;
-  backdrop-filter: blur(18px);
-  background: rgba(246, 247, 250, 0.9);
-  border-bottom: 1px solid rgba(17, 17, 17, 0.04);
+  padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
+  backdrop-filter: none;
+  background: transparent;
+  border-bottom: 0;
 }
 
 .topbar-compact {
@@ -84,6 +84,7 @@ button {
 }
 
 .topbar-row-compact {
+  min-height: 32px;
   gap: 8px;
   align-items: center;
   flex-wrap: nowrap;
@@ -1052,11 +1053,28 @@ button {
 .topbar-action-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.topbar-row-centered {
+  justify-content: center;
+}
+
+.topbar-row-centered .topbar-meta-compact {
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.topbar-row-centered .topbar-actions {
+  flex: 0 0 auto;
+  justify-content: flex-start;
 }
 
 .topbar-utility-button,
 .topbar-primary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 30px;
   width: auto;
   min-width: 0;
@@ -1064,6 +1082,46 @@ button {
   border-radius: 999px;
   white-space: nowrap;
   font-size: 13px;
+}
+
+.topbar-date-button {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.topbar-date-pill {
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--page-ink);
+}
+
+.topbar-date-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: -0.01em;
+  pointer-events: none;
+}
+
+.topbar-date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .topbar-primary-action {
@@ -1089,33 +1147,99 @@ button {
 }
 
 .exercise-picker {
-  padding: 16px;
+  padding: 12px 12px 14px;
 }
 
-.exercise-picker-title {
-  margin-bottom: 10px;
-  font-size: 18px;
-  font-weight: 700;
+.exercise-picker-group + .exercise-picker-group,
+.exercise-picker-more + .exercise-picker-group {
+  margin-top: 10px;
 }
 
-.exercise-option {
+.exercise-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.exercise-tile {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 4px;
+  min-height: 72px;
   width: 100%;
-  text-align: left;
-  background: #f2f4f7;
-  border-radius: 12px;
-  padding: 15px 16px;
-  color: var(--page-ink);
-  font-size: 16px;
+  padding: 6px 2px;
+  text-align: center;
+  border-radius: 14px;
+  background: transparent;
+  transition: transform 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.exercise-option + .exercise-option {
+.exercise-tile:hover {
+  background: rgba(17, 17, 17, 0.03);
+}
+
+.exercise-tile:active {
+  transform: scale(0.97);
+  background: rgba(17, 17, 17, 0.07);
+}
+
+.exercise-tile-secondary {
+  opacity: 0.9;
+}
+
+.exercise-tile-icon-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #0f0f10;
+}
+
+.exercise-tile-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.exercise-tile-label {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--page-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.exercise-picker-more {
   margin-top: 8px;
 }
 
+.exercise-picker-more-toggle {
+  font-size: 13px;
+}
+
 .picker-footer {
-  margin-top: 14px;
+  margin-top: 10px;
   display: flex;
-  justify-content: center;
+  gap: 8px;
+}
+
+.picker-footer-button {
+  min-height: 40px;
+  border-radius: 999px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.picker-footer-button-subtle {
+  background: #f4f5f7;
+  border-color: transparent;
 }
 
 .center-text {
@@ -1223,6 +1347,11 @@ button {
   background: #111111;
   color: #ffffff;
   box-shadow: 0 18px 36px rgba(17, 24, 39, 0.24);
+}
+
+.floating-action-button:disabled {
+  opacity: 0.62;
+  cursor: default;
 }
 
 .floating-action-button .nav-icon {
@@ -1458,7 +1587,7 @@ button {
 
 .topbar-meta-compact {
   flex: 1 1 auto;
-  min-height: 30px;
+  min-height: 32px;
   justify-content: flex-start;
   gap: 6px;
   align-content: center;
@@ -1467,9 +1596,12 @@ button {
 .pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   border-radius: 999px;
-  min-height: 28px;
-  padding: 5px 9px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
   background: rgba(69, 98, 208, 0.1);
   color: var(--success-ink);
   font-size: 11px;
@@ -1666,6 +1798,15 @@ button {
 
   .topbar-actions {
     width: auto;
+  }
+
+  .topbar-row-centered {
+    justify-content: center;
+  }
+
+  .topbar-row-centered .topbar-meta {
+    width: auto;
+    justify-content: center;
   }
 
   .topbar-actions > * {

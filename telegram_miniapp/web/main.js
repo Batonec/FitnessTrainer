@@ -48,6 +48,7 @@ const state = {
   editingWorkoutClientId: null,
   activeSetEditor: null,
   isAddingExercise: false,
+  showAllExerciseOptions: false,
   isAddingSet: false,
   isSavingWorkout: false,
   currentSetReps: 12,
@@ -380,10 +381,17 @@ function handleClick(event) {
       break;
     case "start-adding-exercise":
       state.isAddingExercise = true;
+      state.showAllExerciseOptions = false;
       render();
       break;
     case "cancel-adding-exercise":
       state.isAddingExercise = false;
+      state.showAllExerciseOptions = false;
+      persistDraft();
+      render();
+      break;
+    case "toggle-more-exercises":
+      state.showAllExerciseOptions = !state.showAllExerciseOptions;
       persistDraft();
       render();
       break;
@@ -785,6 +793,119 @@ function getAvailableExercises() {
   return state.exercises.filter((exercise) => !addedIds.has(exercise.id));
 }
 
+function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
+  const available = Array.isArray(exercises) ? exercises : [];
+  if (!available.length) {
+    return {
+      primary: [],
+      secondary: [],
+    };
+  }
+
+  const stats = buildExerciseUsageStats(workouts);
+  const rankedAvailable = available.map((exercise, catalogIndex) => {
+    const exerciseStats = stats.get(exercise.id) || null;
+    return {
+      exercise,
+      count: exerciseStats?.count ?? 0,
+      averagePosition: exerciseStats?.averagePosition ?? Number.POSITIVE_INFINITY,
+      latestWorkoutDate: exerciseStats?.latestWorkoutDate ?? "",
+      catalogIndex,
+    };
+  });
+
+  const rankedByImportance = [...rankedAvailable].sort((left, right) => {
+    if (right.count !== left.count) {
+      return right.count - left.count;
+    }
+    if (right.latestWorkoutDate !== left.latestWorkoutDate) {
+      return right.latestWorkoutDate.localeCompare(left.latestWorkoutDate);
+    }
+    if (left.averagePosition !== right.averagePosition) {
+      return left.averagePosition - right.averagePosition;
+    }
+    return left.catalogIndex - right.catalogIndex;
+  });
+
+  const suggestedPool = rankedByImportance
+    .filter((item) => item.count > 0)
+    .slice(0, 6);
+
+  if (!suggestedPool.length) {
+    return {
+      primary: rankedByImportance.slice(0, 6).map((item) => item.exercise),
+      secondary: rankedByImportance.slice(6).map((item) => item.exercise),
+    };
+  }
+
+  const suggestedIds = new Set(suggestedPool.map((item) => item.exercise.id));
+  const primary = rankedAvailable
+    .filter((item) => suggestedIds.has(item.exercise.id))
+    .sort((left, right) => {
+      if (left.averagePosition !== right.averagePosition) {
+        return left.averagePosition - right.averagePosition;
+      }
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+      if (right.latestWorkoutDate !== left.latestWorkoutDate) {
+        return right.latestWorkoutDate.localeCompare(left.latestWorkoutDate);
+      }
+      return left.catalogIndex - right.catalogIndex;
+    })
+    .map((item) => item.exercise);
+
+  const secondary = rankedAvailable
+    .filter((item) => !suggestedIds.has(item.exercise.id))
+    .sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+      if (right.latestWorkoutDate !== left.latestWorkoutDate) {
+        return right.latestWorkoutDate.localeCompare(left.latestWorkoutDate);
+      }
+      return left.exercise.name.localeCompare(right.exercise.name, "ru-RU");
+    })
+    .map((item) => item.exercise);
+
+  return { primary, secondary };
+}
+
+function buildExerciseUsageStats(workouts) {
+  const stats = new Map();
+
+  sortWorkouts(workouts).forEach((workout) => {
+    const exercises = Array.isArray(workout?.data?.exercises) ? workout.data.exercises : [];
+    exercises.forEach((exercise, index) => {
+      const exerciseId = Number(exercise.exercise_id);
+      if (!Number.isFinite(exerciseId) || exerciseId <= 0) {
+        return;
+      }
+
+      const current = stats.get(exerciseId) || {
+        count: 0,
+        totalPosition: 0,
+        latestWorkoutDate: "",
+      };
+      current.count += 1;
+      current.totalPosition += index;
+      if (!current.latestWorkoutDate || workout.workout_date > current.latestWorkoutDate) {
+        current.latestWorkoutDate = workout.workout_date;
+      }
+      stats.set(exerciseId, current);
+    });
+  });
+
+  stats.forEach((value, exerciseId) => {
+    stats.set(exerciseId, {
+      ...value,
+      averagePosition: value.count ? value.totalPosition / value.count : Number.POSITIVE_INFINITY,
+    });
+  });
+
+  return stats;
+}
+
 function getProgressExercises(workouts = getAllWorkouts()) {
   const lookup = new Map();
 
@@ -836,6 +957,7 @@ function focusDraftExercise(exerciseId) {
 
   state.selectedExerciseId = Number(exerciseId);
   state.isAddingExercise = false;
+  state.showAllExerciseOptions = false;
   return draftExercise;
 }
 
@@ -903,6 +1025,7 @@ function startEditingWorkout(workoutId) {
   state.isAddingSet = false;
   state.isSavingWorkout = false;
   state.isAddingExercise = false;
+  state.showAllExerciseOptions = false;
   writeTextStorage(STORAGE_KEYS.tab, "new");
   persistDraft();
   queueScrollRestore("new", 0);
@@ -1157,6 +1280,7 @@ function removeDraftExercise(exerciseId) {
 function finishExercise() {
   state.isAddingSet = false;
   state.isAddingExercise = true;
+  state.showAllExerciseOptions = false;
   persistDraft();
   render();
 }
@@ -1198,6 +1322,7 @@ function applyWorkoutPlanSuggestion() {
     generatedFromWorkoutDate: String(plan.generated_from_workout_date || ""),
   };
   state.isAddingExercise = false;
+  state.showAllExerciseOptions = false;
   state.isAddingSet = false;
   state.activeSetEditor = null;
   persistDraft();
@@ -1273,6 +1398,7 @@ function resetDraftState() {
   state.openWorkoutSwipeId = null;
   state.activeSetEditor = null;
   state.isAddingExercise = state.exercises.length > 0;
+  state.showAllExerciseOptions = false;
   state.isAddingSet = false;
   state.currentSetReps = 12;
   state.currentSetWeight = 0;
@@ -2015,6 +2141,10 @@ function renderTopbar() {
 
   const buildPills = buildTopbarPills();
   let actionMarkup = "";
+  const topbarRowClass =
+    state.currentTab === "new"
+      ? "topbar-row topbar-row-compact topbar-row-centered"
+      : "topbar-row topbar-row-compact";
   if (state.currentTab === "progress") {
     actionMarkup = `
       <button class="secondary-button topbar-utility-button" data-action="refresh-progress">
@@ -2026,16 +2156,20 @@ function renderTopbar() {
   if (state.currentTab === "new") {
     actionMarkup = `
       <div class="topbar-action-group">
-        <button class="secondary-button topbar-utility-button" data-action="close-new-workout">
-          Назад
-        </button>
-        ${
-          state.workoutExercises.length > 0
-            ? `<button class="action-button topbar-primary-action" data-action="finish-workout" ${
-                state.isSavingWorkout ? "disabled" : ""
-              }>${state.isSavingWorkout ? "Сохраняю..." : "Сохранить"}</button>`
-            : ""
-        }
+        <label
+          class="pill topbar-date-button topbar-date-pill"
+          title="${escapeHtml(formatLongDate(state.workoutDate))}"
+        >
+          <span class="topbar-date-text">${escapeHtml(formatTopbarWorkoutDate(state.workoutDate))}</span>
+          <input
+            id="topbar-workout-date"
+            class="topbar-date-input"
+            type="date"
+            value="${escapeHtml(state.workoutDate)}"
+            data-action="change-workout-date"
+            aria-label="Дата тренировки"
+          />
+        </label>
       </div>
     `;
   }
@@ -2043,7 +2177,7 @@ function renderTopbar() {
   return `
     <header class="topbar topbar-compact">
       <h1 class="sr-only topbar-title">${escapeHtml(titles[state.currentTab])}</h1>
-      <div class="topbar-row topbar-row-compact">
+      <div class="${topbarRowClass}">
         <div class="topbar-meta topbar-meta-compact">${buildPills}</div>
         ${actionMarkup ? `<div class="topbar-actions">${actionMarkup}</div>` : ""}
       </div>
@@ -2629,8 +2763,6 @@ function renderNewWorkoutScreen() {
 
   return `
     <section class="stack">
-      ${renderWorkoutMetaCard()}
-
       ${
         shouldShowPlanSuggestion && nextWorkoutPlan
           ? renderNewWorkoutPlanSuggestionCard(nextWorkoutPlan)
@@ -2653,7 +2785,7 @@ function renderNewWorkoutScreen() {
         .join("")}
 
       ${
-        availableExercises.length && !state.isAddingExercise
+        availableExercises.length && !state.isAddingExercise && !shouldShowPlanSuggestion
           ? `<button class="secondary-button add-exercise-button" data-action="start-adding-exercise">${
               state.workoutExercises.length ? "Добавить ещё упражнение" : "Добавить упражнение"
             }</button>`
@@ -2732,7 +2864,6 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
       <div class="draft-exercise-head">
         <div class="exercise-title-row">
           <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
-          ${isSelected ? `<span class="exercise-focus-pill">Сейчас</span>` : ""}
         </div>
         <div class="draft-exercise-actions">
           <button
@@ -2833,42 +2964,83 @@ function renderCurrentExerciseCard(exerciseName) {
 }
 
 function renderExercisePicker(exercises) {
+  const { primary: primaryExercises, secondary: secondaryExercises } =
+    getExercisePickerGroups(exercises);
+  const shouldShowMoreToggle = secondaryExercises.length > 0;
+  const shouldShowSecondary = state.showAllExerciseOptions && shouldShowMoreToggle;
+
   return `
     <section class="card exercise-picker">
-      <div class="exercise-picker-title">Выберите упражнение</div>
       ${
-        state.workoutExercises.length
-          ? `<p class="muted-note">В этом черновике уже есть ${state.workoutExercises.length} упражнений. Можно добавить ещё одно и потом чередовать сеты между карточками.</p>`
+        primaryExercises.length
+          ? `
+            <div class="exercise-picker-group">
+              ${renderExerciseTileGrid(primaryExercises)}
+            </div>
+          `
+          : exercises.length
+            ? renderExerciseTileGrid(exercises)
+            : `<p class="muted-note">В локальной базе не осталось свободных упражнений.</p>`
+      }
+      ${
+        shouldShowMoreToggle
+          ? `
+            <div class="exercise-picker-more">
+              <button class="text-button exercise-picker-more-toggle" data-action="toggle-more-exercises">
+                ${state.showAllExerciseOptions ? "Скрыть редкие упражнения" : `Ещё упражнения (${secondaryExercises.length})`}
+              </button>
+            </div>
+          `
           : ""
       }
       ${
-        exercises.length
-          ? exercises
-              .map(
-                (exercise) => `
-                  <button
-                    class="exercise-option"
-                    data-action="select-exercise"
-                    data-exercise-id="${exercise.id}"
-                  >
-                    ${escapeHtml(exercise.name)}
-                  </button>
-                `
-              )
-              .join("")
-          : `<p class="muted-note">В локальной базе не осталось свободных упражнений.</p>`
+        shouldShowSecondary
+          ? `
+            <div class="exercise-picker-group exercise-picker-group-secondary">
+              ${renderExerciseTileGrid(secondaryExercises, { secondary: true })}
+            </div>
+          `
+          : ""
       }
       ${
         state.workoutExercises.length || state.selectedExerciseId
           ? `
             <div class="picker-footer">
-              <button class="text-button" data-action="reset-workout-draft">Начать заново</button>
-              <button class="text-button" data-action="cancel-adding-exercise">Отмена</button>
+              <button class="secondary-button picker-footer-button" data-action="reset-workout-draft">Начать заново</button>
+              <button class="secondary-button picker-footer-button picker-footer-button-subtle" data-action="cancel-adding-exercise">Отмена</button>
             </div>
           `
           : ""
       }
     </section>
+  `;
+}
+
+function renderExerciseTileGrid(exercises, { secondary = false } = {}) {
+  if (!Array.isArray(exercises) || !exercises.length) {
+    return "";
+  }
+
+  return `
+    <div class="exercise-tile-grid ${secondary ? "exercise-tile-grid-secondary" : ""}">
+      ${exercises.map((exercise) => renderExerciseTile(exercise, { secondary })).join("")}
+    </div>
+  `;
+}
+
+function renderExerciseTile(exercise, { secondary = false } = {}) {
+  return `
+    <button
+      class="exercise-tile ${secondary ? "exercise-tile-secondary" : ""}"
+      data-action="select-exercise"
+      data-exercise-id="${exercise.id}"
+      aria-label="${escapeHtml(exercise.name)}"
+    >
+      <span class="exercise-tile-icon-slot" aria-hidden="true">
+        ${exerciseIconMarkup(exercise.name)}
+      </span>
+      <span class="exercise-tile-label">${escapeHtml(exercise.name)}</span>
+    </button>
   `;
 }
 
@@ -2938,15 +3110,28 @@ function renderBottomNav() {
 }
 
 function renderFloatingActionButton() {
-  if (state.currentTab !== "trainings") {
-    return "";
+  if (state.currentTab === "trainings") {
+    return `
+      <button class="floating-action-button" data-action="open-new-workout" aria-label="Новая тренировка">
+        ${iconMarkup("new")}
+      </button>
+    `;
   }
 
-  return `
-    <button class="floating-action-button" data-action="open-new-workout" aria-label="Новая тренировка">
-      ${iconMarkup("new")}
-    </button>
-  `;
+  if (state.currentTab === "new" && state.workoutExercises.length > 0) {
+    return `
+      <button
+        class="floating-action-button floating-action-button-save"
+        data-action="finish-workout"
+        aria-label="${state.isSavingWorkout ? "Сохраняю тренировку" : "Сохранить тренировку"}"
+        ${state.isSavingWorkout ? "disabled" : ""}
+      >
+        ${iconMarkup("save")}
+      </button>
+    `;
+  }
+
+  return "";
 }
 
 function renderLoadBadge(loadType) {
@@ -2975,11 +3160,11 @@ function buildTopbarPills() {
   const pills = [];
 
   if (state.currentUser?.is_default_debug_user) {
-    pills.push('<span class="pill pill-build">Browser debug</span>');
+    pills.push('<span class="pill pill-build">WEB</span>');
   } else if (state.currentUser?.auth_source === "telegram") {
-    pills.push('<span class="pill pill-build">Telegram</span>');
+    pills.push('<span class="pill pill-build">TG</span>');
   } else if (state.currentUser?.auth_source === "telegram_unsafe") {
-    pills.push('<span class="pill pill-build">TG fallback</span>');
+    pills.push('<span class="pill pill-build">TG</span>');
   }
 
   if (Number.isFinite(state.currentUser?.id)) {
@@ -3019,6 +3204,16 @@ function formatShortDate(value) {
     day: "2-digit",
     month: "short",
   }).format(parseIsoDate(value));
+}
+
+function formatTopbarWorkoutDate(value) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })
+    .format(parseIsoDate(value))
+    .replace(/\s?г\.$/, "");
 }
 
 function formatWeight(value) {
@@ -3116,10 +3311,176 @@ function iconMarkup(name) {
     `;
   }
 
+  if (name === "save") {
+    return `
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 12.5l4 4l8-9"></path>
+      </svg>
+    `;
+  }
+
   return `
     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 5v14"></path>
       <path d="M5 12h14"></path>
+    </svg>
+  `;
+}
+
+function exerciseIconMarkup(exerciseName) {
+  const name = String(exerciseName || "").toLowerCase();
+  let icon = "generic";
+
+  if (name.includes("жим ног")) {
+    icon = "leg-press";
+  } else if (name.includes("разгибания ног")) {
+    icon = "leg-extension";
+  } else if (name.includes("сгибания ног")) {
+    icon = "leg-curl";
+  } else if (name.includes("жим гор")) {
+    icon = "bench-press";
+  } else if (name.includes("жим в тренаж")) {
+    icon = "chest-press";
+  } else if (name.includes("тяга верт") || name.includes("подтяг")) {
+    icon = "vertical-pull";
+  } else if (name.includes("тяга горизонт")) {
+    icon = "row";
+  } else if (name.includes("дельт")) {
+    icon = "shoulders";
+  } else if (name.includes("бицеп")) {
+    icon = "biceps";
+  } else if (name.includes("трицеп")) {
+    icon = "triceps";
+  } else if (name.includes("бабоч")) {
+    icon = "fly";
+  }
+
+  // Icons sourced from the Huge Icons collection via the official Iconify API (MIT).
+  if (icon === "leg-press") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M5.002 2c2.691.314 8.897 1.896 11.64 5.746c.337.47.69.804 1.27.95c.724.18 1.324.666 1.542 1.4c.232.798.66 1.64.524 2.494c-.052.327-.212.628-.532 1.23L15.099 22"></path>
+          <path d="M4.002 12c1 1.726 4.164 2.596 8 1.726a10.1 10.1 0 0 0-2.685 2.225c-.559.646-.797 1.544-.836 2.452c-.052 1.212-.232 2.53-.854 3.597"></path>
+          <path d="M5.002 7s1.959.29 3.5 1.5c1 .786 2.916 1.31 3.5 1.5"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  if (icon === "leg-extension") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M5.002 2c2.691.314 8.897 1.896 11.64 5.746c.337.47.69.804 1.27.95c.724.18 1.324.666 1.542 1.4c.232.798.66 1.64.524 2.494c-.052.327-.212.628-.532 1.23L15.099 22"></path>
+          <path d="M4.002 12c1 1.726 4.164 2.596 8 1.726a10.1 10.1 0 0 0-2.685 2.225c-.559.646-.797 1.544-.836 2.452c-.052 1.212-.232 2.53-.854 3.597"></path>
+          <path d="M5.002 7s1.959.29 3.5 1.5c1 .786 2.916 1.31 3.5 1.5"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  if (icon === "leg-curl") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M5.002 2c2.691.314 8.897 1.896 11.64 5.746c.337.47.69.804 1.27.95c.724.18 1.324.666 1.542 1.4c.232.798.66 1.64.524 2.494c-.052.327-.212.628-.532 1.23L15.099 22"></path>
+          <path d="M4.002 12c1 1.726 4.164 2.596 8 1.726a10.1 10.1 0 0 0-2.685 2.225c-.559.646-.797 1.544-.836 2.452c-.052 1.212-.232 2.53-.854 3.597"></path>
+          <path d="M5.002 7s1.959.29 3.5 1.5c1 .786 2.916 1.31 3.5 1.5"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  if (icon === "chest-press") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M13.91 8.368c.302.233.364.621.49 1.398l.457 2.849c.163 1.008.244 1.512-.076 1.84c-.756.774-4.9.678-5.562 0c-.32-.328-.239-.832-.077-1.84L9.6 9.766c.125-.777.188-1.165.49-1.398c.62-.478 3.167-.503 3.82 0"></path>
+          <path d="M7.5 19c.042-.127.063-.19.086-.246a2 2 0 0 1 1.735-1.25c.06-.004.127-.004.26-.004h4.838c.133 0 .2 0 .26.004a2 2 0 0 1 1.735 1.25c.023.056.044.12.086.246"></path>
+          <path d="M12 17.5V22m0 0h7m-7 0H5"></path>
+          <path d="M21 14v-3.597c0-.695 0-1.042-.113-1.363c-.113-.322-.33-.593-.764-1.136l-1.922-2.403c-.59-.737-.885-1.106-1.296-1.304C16.495 4 16.022 4 15.077 4H8.923c-.944 0-1.416 0-1.827.197c-.41.198-.706.567-1.296 1.304L3.877 7.904c-.434.543-.652.814-.764 1.136C3 9.36 3 9.708 3 10.403V14"></path>
+          <path d="M3 12h3m15 0h-3m-6-4V2"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  if (icon === "bench-press") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path d="M18 3v5M6 3v5m14.5-4v1.5m0 0V7m0-1.5H22M3.5 4v1.5m0 0V7m0-1.5H2m16 0H6m4 0V10m4-4.5V10m4.952 6H5.062m9.194-6h-4.05c-1.007 0-1.38.144-1.934.992l-3.013 4.612c-.186.284-.259.51-.259.854C5 18.611 5.873 19 7.847 19h8.25C18.133 19 19 18.616 19 16.408c0-.306-.057-.51-.204-.773l-2.537-4.53c-.534-.953-.918-1.105-2.003-1.105M16 19v2m-8-2v2"></path>
+      </svg>
+    `;
+  }
+
+  if (icon === "vertical-pull") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M15.5 10A1.5 1.5 0 0 1 14 8.5M8.5 10A1.5 1.5 0 0 0 10 8.5M14 2v.643c0 .587 0 .88.065 1.13a2 2 0 0 0 1.16 1.336c.237.1.527.141 1.108.224c1.162.166 1.743.25 2.218.45a4 4 0 0 1 2.318 2.672C21 8.954 21 9.54 21 10.714V22M10 2v.643c0 .587 0 .88-.065 1.13a2 2 0 0 1-1.16 1.336c-.237.1-.527.141-1.108.224c-1.162.166-1.743.25-2.218.45A4 4 0 0 0 3.13 8.454C3 8.954 3 9.54 3 10.714V22m9-9v9"></path>
+          <path d="M18 11.5s-.545 2.864-.497 5.727C17.535 19.127 18 22 18 22M6 11.5s.545 2.864.497 5.727C6.465 19.127 6 22 6 22"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  if (icon === "row") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M15.5 10A1.5 1.5 0 0 1 14 8.5M8.5 10A1.5 1.5 0 0 0 10 8.5M14 2v.643c0 .587 0 .88.065 1.13a2 2 0 0 0 1.16 1.336c.237.1.527.141 1.108.224c1.162.166 1.743.25 2.218.45a4 4 0 0 1 2.318 2.672C21 8.954 21 9.54 21 10.714V22M10 2v.643c0 .587 0 .88-.065 1.13a2 2 0 0 1-1.16 1.336c-.237.1-.527.141-1.108.224c-1.162.166-1.743.25-2.218.45A4 4 0 0 0 3.13 8.454C3 8.954 3 9.54 3 10.714V22m9-9v9"></path>
+          <path d="M18 11.5s-.545 2.864-.497 5.727C17.535 19.127 18 22 18 22M6 11.5s.545 2.864.497 5.727C6.465 19.127 6 22 6 22"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  if (icon === "shoulders") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path d="m17 7l2 .5m-11 10s-3-1.5-3-5s2.5-5 7-6.5c3-1 5-2 5-4M6 16s-.5 1.385-.5 3.23C5.5 20.616 6 22 6 22m6-7l.813 1.219A4 4 0 0 0 16.14 18H19m-1-3v.01m-5 1.49V22"></path>
+      </svg>
+    `;
+  }
+
+  if (icon === "biceps") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path d="M2.018 20.305c1.129 1.615 6.041 2.882 8.362-.14c2.51 1.2 6.649.828 10.02-1.052c.468-.26.911-.59 1.183-1.054c.613-1.045.627-2.495-.491-4.634c-1.865-4.654-5.218-8.74-6.572-10.383c-.278-.253-2.051-.613-3.133-.96c-.478-.147-1.367-.245-2.43 1.157c-.505.664-2.796 2.297.11 3.394c.451.115.782.326 2.837-.049c.267-.046.935 0 1.406.826l.984 1.407a.96.96 0 0 1 .169.44c.172 1.499.166 3.375 1.002 4.326c-1.29-.934-4.664-2.042-7.206 1.112M2.002 12.94a6.714 6.714 0 0 1 8.416-.418"></path>
+      </svg>
+    `;
+  }
+
+  if (icon === "triceps") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <path d="M2.018 20.305c1.129 1.615 6.041 2.882 8.362-.14c2.51 1.2 6.649.828 10.02-1.052c.468-.26.911-.59 1.183-1.054c.613-1.045.627-2.495-.491-4.634c-1.865-4.654-5.218-8.74-6.572-10.383c-.278-.253-2.051-.613-3.133-.96c-.478-.147-1.367-.245-2.43 1.157c-.505.664-2.796 2.297.11 3.394c.451.115.782.326 2.837-.049c.267-.046.935 0 1.406.826l.984 1.407a.96.96 0 0 1 .169.44c.172 1.499.166 3.375 1.002 4.326c-1.29-.934-4.664-2.042-7.206 1.112M2.002 12.94a6.714 6.714 0 0 1 8.416-.418"></path>
+      </svg>
+    `;
+  }
+
+  if (icon === "fly") {
+    return `
+      <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+        <g>
+          <path d="M3 3v18M21 3v18m1-15H2"></path>
+          <path d="M15.5 10c1.105 0 2 .97 2 2.165c0 .283-.05.554-.142.802c-.294.798-3.489.617-3.716 0a2.3 2.3 0 0 1-.142-.802c0-1.196.895-2.165 2-2.165Zm-7 0c1.105 0 2 .97 2 2.165c0 .283-.05.554-.142.802c-.294.798-3.489.617-3.716 0a2.3 2.3 0 0 1-.142-.802c0-1.196.895-2.165 2-2.165Z"></path>
+          <path d="M8.5 10V6m7 4V6"></path>
+        </g>
+      </svg>
+    `;
+  }
+
+  return `
+    <svg class="exercise-tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+      <g>
+        <path d="M10.529 8h2.942c.56 0 1.147.002 1.397.617c.176.433.176 1.333 0 1.766c-.25.615-.837.617-1.397.617H10.53c-.56 0-1.147-.002-1.397-.617c-.176-.433-.176-1.333 0-1.766C9.383 8.002 9.97 8 10.53 8"></path>
+        <path d="m10.529 11h2.942c.56 0 1.147.002 1.397.617c.176.433.176 1.333 0 1.766c-.25.615-.837.617-1.397.617H10.53c-.56 0-1.147-.002-1.397-.617c-.176-.433-.176-1.333 0-1.766c.25-.615.837-.617 1.397-.617"></path>
+        <path d="M7.5 19c.042-.127.063-.19.086-.246a2 2 0 0 1 1.735-1.25c.06-.004.127-.004.26-.004h4.838c.133 0 .2 0 .26.004a2 2 0 0 1 1.735 1.25c.023.056.044.12.086.246"></path>
+        <path d="M12 17.5V22m0 0h7m-7 0H5"></path>
+        <path d="m21 8.5l-1.204-1.405c-.884-1.03-1.325-1.546-1.922-1.82C17.277 5 16.598 5 15.24 5H8.76c-1.358 0-2.037 0-2.634.274c-.597.275-1.038.79-1.922 1.821L3 8.5m9-.5V2"></path>
+      </g>
     </svg>
   `;
 }
