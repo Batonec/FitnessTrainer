@@ -517,7 +517,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(picker).to_contain_text("Жим гор.")
         expect(picker).to_contain_text("Жим в тренажере")
 
-    def test_exercise_picker_hides_already_added_primary_exercise(self) -> None:
+    def test_exercise_picker_returns_empty_selection_back_to_picker_on_cancel(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
         self.open_new_workout()
@@ -529,11 +529,29 @@ class MiniAppE2ETest(unittest.TestCase):
         leg_press_tile.click()
         self.page.locator('[data-action="set-cancel"]').click()
 
-        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(0)
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_have_count(0)
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(1)
         expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Трицепс")).to_have_count(1)
         expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.")).to_have_count(0)
         expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Бабочка")).to_have_count(1)
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
+
+    def test_exercise_picker_hides_primary_exercise_after_first_set_is_added(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        picker = self.page.locator(".exercise-picker")
+        leg_press_tile = picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
+
+        leg_press_tile.click()
+        self.add_default_set()
+
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(0)
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(1)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(1)
 
     def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
         self.seed_popular_exercise_picker_history()
@@ -549,7 +567,7 @@ class MiniAppE2ETest(unittest.TestCase):
             "Бабочка",
         ]:
             self.page.locator('[data-action="select-exercise"]').filter(has_text=exercise_name).click()
-            self.page.locator('[data-action="set-cancel"]').click()
+            self.add_default_set()
 
         picker = self.page.locator(".exercise-picker")
         expect(picker.locator(".exercise-picker-complete-title")).to_contain_text("Круто, тренировка закончена")
@@ -570,11 +588,11 @@ class MiniAppE2ETest(unittest.TestCase):
 
         for exercise_name in ["Жим ногами", "Тяга верт.", "Дельты", "Бицепс"]:
             self.page.locator('[data-action="select-exercise"]').filter(has_text=exercise_name).click()
-            self.page.locator('[data-action="set-cancel"]').click()
+            self.add_default_set()
             self.page.wait_for_timeout(150)
 
         self.page.locator('[data-action="select-exercise"]').filter(has_text="Трицепс").click()
-        self.page.locator('[data-action="set-cancel"]').click()
+        self.add_default_set()
         self.page.wait_for_timeout(500)
 
         last_card = self.page.locator('[data-draft-exercise-id="12"]').first
@@ -590,6 +608,70 @@ class MiniAppE2ETest(unittest.TestCase):
         self.assertIsNotNone(picker_box)
         self.assertLess(last_card_box["y"] + last_card_box["height"], fab_box["y"] - 8)
         self.assertLess(picker_box["y"], fab_box["y"] - 8)
+
+    def test_new_workout_fabs_appear_only_after_first_real_set(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
+
+        self.select_exercise_by_name("Жим ногами")
+        expect(self.page.locator(".modal-card")).to_be_visible()
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
+
+        self.page.locator('[data-action="set-cancel"]').click()
+        expect(self.page.locator(".exercise-card")).to_have_count(0)
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(1)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(1)
+
+    def test_workout_progress_ring_updates_only_for_exercises_with_sets(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.page.wait_for_timeout(100)
+        self.assertEqual(
+            self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()"),
+            0,
+        )
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
+
+        self.page.locator('[data-action="set-cancel"]').click()
+        self.page.wait_for_timeout(100)
+        self.assertEqual(
+            self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()"),
+            0,
+        )
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.wait_for_function(
+            "() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > 0"
+        )
+        first_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
+        self.assertAlmostEqual(first_ratio, 1 / 6, delta=0.02)
+        expect(self.page.locator('[data-action="open-new-workout"].has-progress')).to_have_count(0)
+
+        self.leave_new_workout()
+        expect(self.page.locator('[data-action="open-new-workout"].has-progress')).to_have_count(1)
+
+        self.open_new_workout()
+        self.select_exercise_by_name("Тяга верт.")
+        self.add_default_set()
+        self.page.wait_for_function(
+            f"() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > {first_ratio + 0.01}"
+        )
+        second_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
+        self.assertAlmostEqual(second_ratio, 2 / 6, delta=0.02)
 
     def test_telegram_shell_requests_fullscreen_and_disables_vertical_swipes(self) -> None:
         self.open_app()
@@ -717,10 +799,10 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator(".exercise-card")).to_have_count(0)
         expect(self.page.locator(".exercise-picker")).to_be_visible()
         expect(
-            self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.")
+            self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
         ).to_be_visible()
         expect(
-            self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
+            self.page.locator('[data-action="toggle-more-exercises"]')
         ).to_be_visible()
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
@@ -752,6 +834,57 @@ class MiniAppE2ETest(unittest.TestCase):
 
         expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
+
+    def test_resuming_saved_draft_morphs_plus_icon_without_replaying_save_fab_enter(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.leave_new_workout()
+
+        trainings_fab = self.page.locator('[data-action="open-new-workout"]').first
+        expect(trainings_fab).to_have_count(1)
+        expect(trainings_fab).to_have_class(re.compile(r".*has-progress.*"))
+
+        self.open_new_workout()
+
+        save_fab = self.page.locator('[data-action="finish-workout"]').first
+        fab_group = self.page.locator(".new-workout-fab-group").first
+        expect(save_fab).to_have_class(re.compile(r".*is-icon-morph.*"))
+        expect(fab_group).not_to_have_class(re.compile(r".*is-enter.*"))
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
+
+    def test_fresh_new_workout_flow_does_not_apply_saved_draft_icon_morph(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+
+        save_fab = self.page.locator('[data-action="finish-workout"]').first
+        expect(save_fab).not_to_have_class(re.compile(r".*is-icon-morph.*"))
+
+    def test_workout_progress_ring_first_step_is_visually_legible(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.wait_for_function(
+            "() => window.__trainerMiniAppTestApi.getDisplayedFabProgressRatio() > 0.15"
+        )
+        logical_ratio = self.page.evaluate(
+            "window.__trainerMiniAppTestApi.getDisplayedFabProgressRatio()"
+        )
+        visible_ratio = self.page.evaluate(
+            "window.__trainerMiniAppTestApi.getDisplayedVisibleFabProgressRatio()"
+        )
+
+        self.assertAlmostEqual(logical_ratio, 1 / 6, delta=0.02)
+        self.assertGreater(visible_ratio, logical_ratio + 0.05)
+        self.assertLess(visible_ratio, 0.35)
 
     def test_new_workout_supports_alternating_superset_sets(self) -> None:
         self.open_app()

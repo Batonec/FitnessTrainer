@@ -87,6 +87,8 @@ let pendingNewWorkoutFabExitAnimation = false;
 let isNewWorkoutDangerFabVisible = false;
 let newWorkoutDangerFabTimeoutId = null;
 let pendingNewWorkoutDangerFabEnterAnimation = false;
+let skipNextNewWorkoutSaveFabEnterAnimation = false;
+let pendingNewWorkoutSaveFabIconMorph = false;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
@@ -534,6 +536,11 @@ function getNewFlowReturnTab() {
 }
 
 function openNewWorkout() {
+  const hasDraftSets = hasWorkoutDraftSets();
+  pendingNewWorkoutSaveFabIconMorph =
+    state.currentTab === "trainings" && hasDraftSets;
+  skipNextNewWorkoutSaveFabEnterAnimation =
+    state.currentTab === "trainings" && hasDraftSets;
   rememberNewFlowOrigin();
   captureScrollPosition(state.currentTab);
   state.openWorkoutSwipeId = null;
@@ -2167,7 +2174,7 @@ function flushPendingFabProgressAnimation() {
     if (Math.abs(targetRatio - startRatio) < 0.001) {
       displayedFabProgressRatio = targetRatio;
       fab.dataset.fabProgressRatio = String(targetRatio);
-      indicator.style.strokeDasharray = `${targetRatio * 100} 100`;
+      indicator.style.strokeDasharray = `${getVisibleFabProgressRatio(targetRatio) * 100} 100`;
       return;
     }
 
@@ -2195,14 +2202,14 @@ function flushPendingFabProgressAnimation() {
 
       displayedFabProgressRatio = nextRatio;
       fab.dataset.fabProgressRatio = String(nextRatio);
-      indicator.style.strokeDasharray = `${nextRatio * 100} 100`;
+      indicator.style.strokeDasharray = `${getVisibleFabProgressRatio(nextRatio) * 100} 100`;
 
       if (elapsed < totalDurationMs) {
         fabProgressAnimationFrameId = window.requestAnimationFrame(step);
       } else {
         displayedFabProgressRatio = targetRatio;
         fab.dataset.fabProgressRatio = String(targetRatio);
-        indicator.style.strokeDasharray = `${targetRatio * 100} 100`;
+        indicator.style.strokeDasharray = `${getVisibleFabProgressRatio(targetRatio) * 100} 100`;
         fabProgressAnimationFrameId = null;
       }
     };
@@ -2238,6 +2245,7 @@ function syncNewWorkoutFabPresenceState() {
     pendingNewWorkoutFabEnterAnimation = false;
     pendingNewWorkoutFabExitAnimation = false;
     pendingNewWorkoutDangerFabEnterAnimation = false;
+    skipNextNewWorkoutSaveFabEnterAnimation = false;
     return;
   }
 
@@ -2249,9 +2257,10 @@ function syncNewWorkoutFabPresenceState() {
     if (newWorkoutFabPresence !== "visible") {
       newWorkoutFabPresence = "visible";
       isNewWorkoutDangerFabVisible = false;
-      pendingNewWorkoutFabEnterAnimation = true;
+      pendingNewWorkoutFabEnterAnimation = !skipNextNewWorkoutSaveFabEnterAnimation;
       pendingNewWorkoutFabExitAnimation = false;
       pendingNewWorkoutDangerFabEnterAnimation = false;
+      skipNextNewWorkoutSaveFabEnterAnimation = false;
       if (newWorkoutDangerFabTimeoutId) {
         window.clearTimeout(newWorkoutDangerFabTimeoutId);
       }
@@ -2644,6 +2653,21 @@ function installTestApi() {
     },
     getBodyWeightValue() {
       return state.bodyWeightValue;
+    },
+    getDraftExercises() {
+      return state.workoutExercises.map((exercise) => ({
+        ...exercise,
+        sets: exercise.sets.map((set) => ({ ...set })),
+      }));
+    },
+    getDisplayedFabProgressRatio() {
+      return displayedFabProgressRatio;
+    },
+    getDisplayedVisibleFabProgressRatio() {
+      return getVisibleFabProgressRatio(displayedFabProgressRatio);
+    },
+    getTargetFabProgressRatio() {
+      return targetFabProgressRatio;
     },
     deleteBodyWeightEntry(entryId) {
       return deleteBodyWeightEntry(Number(entryId));
@@ -3916,7 +3940,7 @@ function renderBottomNav() {
 function renderFabProgressRing(initialRatio, progressColor, progressGlow) {
   const gradientId = `fab-progress-gradient-${fabProgressGradientIdCounter += 1}`;
   const safeRatio = Math.max(0, Math.min(1, Number(initialRatio) || 0));
-  const dashLength = safeRatio * 100;
+  const dashLength = getVisibleFabProgressRatio(safeRatio) * 100;
 
   return `
     <span class="fab-progress-ring" aria-hidden="true" style="--fab-progress-glow: ${progressGlow};">
@@ -3941,6 +3965,26 @@ function renderFabProgressRing(initialRatio, progressColor, progressGlow) {
           style="stroke-dasharray: ${dashLength} 100;"
         ></circle>
       </svg>
+    </span>
+  `;
+}
+
+function getVisibleFabProgressRatio(ratio) {
+  const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+  if (safeRatio <= 0) {
+    return 0;
+  }
+
+  // Keep the first completed exercise visually legible on a small circular ring,
+  // while preserving the underlying logical progress ratio.
+  return Math.min(1, 0.12 + (safeRatio * 0.88));
+}
+
+function renderMorphingFabIcon(fromIcon, toIcon) {
+  return `
+    <span class="fab-icon-stack" aria-hidden="true">
+      <span class="fab-icon-layer fab-icon-layer-from">${iconMarkup(fromIcon)}</span>
+      <span class="fab-icon-layer fab-icon-layer-to">${iconMarkup(toIcon)}</span>
     </span>
   `;
 }
@@ -3974,6 +4018,9 @@ function renderFloatingActionButton() {
   }
 
   if (state.currentTab === "new") {
+    const shouldMorphSaveFabIcon = pendingNewWorkoutSaveFabIconMorph;
+    pendingNewWorkoutSaveFabIconMorph = false;
+
     if (newWorkoutFabPresence === "hidden") {
       return "";
     }
@@ -4001,14 +4048,14 @@ function renderFloatingActionButton() {
     if (newWorkoutFabPresence !== "hidden") {
       actions.push(`
         <button
-          class="floating-action-button floating-action-button-save${draftProgressClass}"
+          class="floating-action-button floating-action-button-save${draftProgressClass} ${shouldMorphSaveFabIcon ? "is-icon-morph" : ""}"
           data-action="finish-workout"
           aria-label="${state.isSavingWorkout ? "Сохраняю тренировку" : "Сохранить тренировку"}"
           ${state.isSavingWorkout ? "disabled" : ""}
           ${draftProgressData}
         >
           ${draftProgressRing}
-          ${iconMarkup("save")}
+          ${shouldMorphSaveFabIcon ? renderMorphingFabIcon("new", "save") : iconMarkup("save")}
         </button>
       `);
     }
