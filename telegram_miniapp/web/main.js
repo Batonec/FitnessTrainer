@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   tab: "trainer-miniapp-tab-v1",
   range: "trainer-miniapp-range-v1",
   progressExercise: "trainer-miniapp-progress-exercise-v1",
+  bodyWeightRange: "trainer-miniapp-body-weight-range-v1",
 };
 
 const PROGRESS_RANGES = [
@@ -32,14 +33,19 @@ const state = {
   scrollPositions: {
     trainings: 0,
     progress: 0,
+    body: 0,
     new: 0,
   },
   pendingScrollRestoreTop: null,
   openWorkoutSwipeId: null,
   selectedRange: readTextStorage(STORAGE_KEYS.range, "DAYS_30"),
+  selectedBodyWeightRange: readTextStorage(STORAGE_KEYS.bodyWeightRange, "DAYS_30"),
   selectedProgressExerciseId: readNumberStorage(STORAGE_KEYS.progressExercise, null),
   currentUser: null,
   exercises: [],
+  bodyWeightEntries: [],
+  bodyWeightDate: getLocalTodayIso(),
+  bodyWeightValue: "",
   workoutDate: getLocalTodayIso(),
   customWorkouts: sortWorkouts(readJsonStorage(STORAGE_KEYS.customWorkouts, [])),
   appliedWorkoutPlan: null,
@@ -52,6 +58,7 @@ const state = {
   showAllExerciseOptions: false,
   isAddingSet: false,
   isSavingWorkout: false,
+  isSavingBodyWeight: false,
   currentSetReps: 12,
   currentSetWeight: 0,
   flashMessage: "",
@@ -91,19 +98,24 @@ async function bootstrap() {
   try {
     await resolveSession();
     await migrateLegacyCustomWorkouts();
-    const [exercisesResponse, workoutsResponse] = await Promise.all([
+    const [exercisesResponse, workoutsResponse, bodyWeightsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
       fetchJson("/api/workouts"),
+      fetchJson("/api/body-weights"),
     ]);
 
     state.exercises = Array.isArray(exercisesResponse.exercises) ? exercisesResponse.exercises : [];
     state.customWorkouts = sortWorkouts(
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
-    state.currentUser = workoutsResponse.user || state.currentUser;
+    state.bodyWeightEntries = sortBodyWeightEntries(
+      Array.isArray(bodyWeightsResponse.entries) ? bodyWeightsResponse.entries : []
+    );
+    state.currentUser = workoutsResponse.user || bodyWeightsResponse.user || state.currentUser;
     ensureSelectedProgressExercise();
     ensureDraftExerciseStillExists();
     ensureNewWorkoutFlow();
+    syncBodyWeightComposer();
     state.booting = false;
     render();
   } catch (error) {
@@ -326,8 +338,17 @@ function handleClick(event) {
     case "select-range":
       selectRange(actionTarget.dataset.range);
       break;
+    case "select-body-weight-range":
+      selectBodyWeightRange(actionTarget.dataset.range);
+      break;
     case "refresh-progress":
       refreshLocalData();
+      break;
+    case "save-body-weight":
+      saveBodyWeight();
+      break;
+    case "delete-body-weight":
+      deleteBodyWeightEntry(Number(actionTarget.dataset.entryId));
       break;
     case "reset-workout-draft":
       resetWorkoutDraftWithConfirmation();
@@ -431,6 +452,12 @@ function handleChange(event) {
     case "change-workout-date":
       setWorkoutDate(String(actionTarget.value || ""));
       break;
+    case "change-body-weight-date":
+      setBodyWeightDate(String(actionTarget.value || ""));
+      break;
+    case "change-body-weight-value":
+      setBodyWeightValue(String(actionTarget.value || ""));
+      break;
     default:
       break;
   }
@@ -453,11 +480,14 @@ function setCurrentTab(tab) {
 }
 
 function normalizeNavTab(tab) {
-  return tab === "progress" ? "progress" : "trainings";
+  if (tab === "progress" || tab === "body") {
+    return tab;
+  }
+  return "trainings";
 }
 
 function normalizeScrollTab(tab) {
-  return tab === "progress" || tab === "new" ? tab : "trainings";
+  return tab === "progress" || tab === "body" || tab === "new" ? tab : "trainings";
 }
 
 function normalizeCurrentTab() {
@@ -520,6 +550,16 @@ function selectRange(rangeKey) {
   render();
 }
 
+function selectBodyWeightRange(rangeKey) {
+  if (!rangeKey || state.selectedBodyWeightRange === rangeKey) {
+    return;
+  }
+
+  state.selectedBodyWeightRange = rangeKey;
+  writeTextStorage(STORAGE_KEYS.bodyWeightRange, rangeKey);
+  render();
+}
+
 async function refreshLocalData() {
   if (state.loadError) {
     state.booting = true;
@@ -530,20 +570,25 @@ async function refreshLocalData() {
   }
   try {
     await resolveSession();
-    const [exercisesResponse, workoutsResponse] = await Promise.all([
+    const [exercisesResponse, workoutsResponse, bodyWeightsResponse] = await Promise.all([
       fetchJson("/data/exercises.json"),
       fetchJson("/api/workouts"),
+      fetchJson("/api/body-weights"),
     ]);
     state.exercises = Array.isArray(exercisesResponse.exercises) ? exercisesResponse.exercises : [];
     state.customWorkouts = sortWorkouts(
       Array.isArray(workoutsResponse.workouts) ? workoutsResponse.workouts : []
     );
-    state.currentUser = workoutsResponse.user || state.currentUser;
+    state.bodyWeightEntries = sortBodyWeightEntries(
+      Array.isArray(bodyWeightsResponse.entries) ? bodyWeightsResponse.entries : []
+    );
+    state.currentUser = workoutsResponse.user || bodyWeightsResponse.user || state.currentUser;
     ensureSelectedProgressExercise();
     ensureEditingWorkoutStillExists();
     state.booting = false;
     state.loadError = null;
     ensureDraftExerciseStillExists();
+    syncBodyWeightComposer();
     render();
   } catch (error) {
     state.booting = false;
@@ -726,6 +771,80 @@ function sortWorkouts(workouts) {
     }
     return right.workout_date.localeCompare(left.workout_date);
   });
+}
+
+function sortBodyWeightEntries(entries) {
+  return [...entries].sort((left, right) => {
+    if (left.entry_date === right.entry_date) {
+      const updatedAtDiff = (Number(left.updated_at) || 0) - (Number(right.updated_at) || 0);
+      if (updatedAtDiff !== 0) {
+        return updatedAtDiff;
+      }
+
+      return (Number(left.id) || 0) - (Number(right.id) || 0);
+    }
+
+    return left.entry_date.localeCompare(right.entry_date);
+  });
+}
+
+function getBodyWeightEntryByDate(entryDate) {
+  return (
+    state.bodyWeightEntries.find((entry) => String(entry.entry_date || "") === String(entryDate || "")) ||
+    null
+  );
+}
+
+function syncBodyWeightComposer({ preferredDate = null, preserveValue = false } = {}) {
+  const resolvedDate =
+    typeof preferredDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(preferredDate)
+      ? preferredDate
+      : /^\d{4}-\d{2}-\d{2}$/.test(state.bodyWeightDate)
+        ? state.bodyWeightDate
+        : getLocalTodayIso();
+
+  state.bodyWeightDate = resolvedDate;
+  if (preserveValue) {
+    return;
+  }
+
+  const entryForSelectedDate = getBodyWeightEntryByDate(resolvedDate);
+  if (entryForSelectedDate) {
+    state.bodyWeightValue = formatBodyWeightInput(entryForSelectedDate.weight);
+    return;
+  }
+
+  const latestEntry = state.bodyWeightEntries.at(-1) || null;
+  state.bodyWeightValue = latestEntry ? formatBodyWeightInput(latestEntry.weight) : "";
+}
+
+function getBodyWeightEntriesInRange(entries, rangeKey) {
+  const range = PROGRESS_RANGES.find((item) => item.key === rangeKey) || PROGRESS_RANGES[1];
+  const today = parseIsoDate(getLocalTodayIso());
+
+  return sortBodyWeightEntries(entries)
+    .map((entry) => ({
+      entry,
+      date: parseIsoDate(entry.entry_date),
+    }))
+    .filter(({ date }) => inRange(date, range.days, today))
+    .map(({ entry }) => entry);
+}
+
+function summarizeBodyWeightEntries(filteredEntries, allEntries = state.bodyWeightEntries) {
+  const sortedAllEntries = sortBodyWeightEntries(allEntries);
+  const sortedFilteredEntries = sortBodyWeightEntries(filteredEntries);
+  const latestOverallEntry = sortedAllEntries.at(-1) || null;
+  const latestEntry = sortedFilteredEntries.at(-1) || null;
+  const firstEntry = sortedFilteredEntries[0] || null;
+
+  return {
+    totalEntries: sortedFilteredEntries.length,
+    latestOverallEntry,
+    latestEntry,
+    firstEntry,
+    delta: latestEntry && firstEntry ? Number(latestEntry.weight) - Number(firstEntry.weight) : 0,
+  };
 }
 
 function getSelectedExercise() {
@@ -971,6 +1090,92 @@ function setWorkoutDate(value) {
 
   state.workoutDate = value;
   persistDraft();
+}
+
+function setBodyWeightDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return;
+  }
+
+  syncBodyWeightComposer({ preferredDate: value });
+  render();
+}
+
+function setBodyWeightValue(value) {
+  state.bodyWeightValue = normalizeBodyWeightInput(value);
+}
+
+async function saveBodyWeight() {
+  const trimmedValue = String(state.bodyWeightValue || "").trim().replace(",", ".");
+  const numericWeight = Number(trimmedValue);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(state.bodyWeightDate)) {
+    showFlash("Выбери корректную дату");
+    return;
+  }
+
+  if (!trimmedValue || !Number.isFinite(numericWeight) || numericWeight <= 0) {
+    showFlash("Введи корректный вес тела");
+    return;
+  }
+
+  if (state.isSavingBodyWeight) {
+    return;
+  }
+
+  state.isSavingBodyWeight = true;
+  render();
+
+  try {
+    const response = await postJson("/api/body-weights", {
+      entry_date: state.bodyWeightDate,
+      weight: numericWeight,
+      notes: null,
+    });
+    const nextEntries = state.bodyWeightEntries.filter(
+      (entry) => String(entry.entry_date || "") !== String(response.entry.entry_date || "")
+    );
+    nextEntries.push(response.entry);
+    state.bodyWeightEntries = sortBodyWeightEntries(nextEntries);
+    state.currentUser = response.user || state.currentUser;
+    syncBodyWeightComposer({ preferredDate: response.entry.entry_date });
+    showFlash(response.created ? "Вес тела сохранён" : "Вес тела обновлён");
+  } catch (error) {
+    showFlash(error.message || "Не удалось сохранить вес тела");
+  } finally {
+    state.isSavingBodyWeight = false;
+    render();
+  }
+}
+
+async function deleteBodyWeightEntry(entryId) {
+  if (!Number.isFinite(entryId) || entryId <= 0) {
+    return;
+  }
+
+  const entry = state.bodyWeightEntries.find((item) => Number(item.id) === entryId);
+  if (!entry) {
+    showFlash("Запись веса уже отсутствует");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Удалить запись веса ${formatBodyWeightValue(entry.weight)} кг от ${formatLongDate(entry.entry_date)}?`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const payload = await deleteJson(`/api/body-weights/${entryId}`);
+    state.currentUser = payload.user || state.currentUser;
+    state.bodyWeightEntries = state.bodyWeightEntries.filter((item) => Number(item.id) !== entryId);
+    syncBodyWeightComposer({ preferredDate: state.bodyWeightDate });
+    render();
+    showFlash("Запись веса удалена");
+  } catch (error) {
+    showFlash(error.message || "Не удалось удалить запись веса");
+  }
 }
 
 function startEditingWorkout(workoutId) {
@@ -2058,6 +2263,15 @@ function installTestApi() {
       closeWorkoutSwipe();
       return true;
     },
+    getBodyWeightEntries() {
+      return state.bodyWeightEntries.map((entry) => ({ ...entry }));
+    },
+    getBodyWeightValue() {
+      return state.bodyWeightValue;
+    },
+    deleteBodyWeightEntry(entryId) {
+      return deleteBodyWeightEntry(Number(entryId));
+    },
   };
 }
 
@@ -2145,6 +2359,7 @@ function renderTopbar() {
   const titles = {
     trainings: "Trainings",
     progress: "Progress",
+    body: "Вес тела",
     new: state.editingWorkoutId ? "Редактирование" : "Новая тренировка",
   };
 
@@ -2190,6 +2405,8 @@ function renderCurrentScreen() {
       return renderTrainingsScreen();
     case "progress":
       return renderProgressScreen();
+    case "body":
+      return renderBodyWeightScreen();
     case "new":
     default:
       return renderNewWorkoutScreen();
@@ -2533,6 +2750,217 @@ function renderProgressScreen() {
   `;
 }
 
+function renderBodyWeightScreen() {
+  const filteredEntries = getBodyWeightEntriesInRange(
+    state.bodyWeightEntries,
+    state.selectedBodyWeightRange
+  );
+  const summary = summarizeBodyWeightEntries(filteredEntries, state.bodyWeightEntries);
+
+  return `
+    <section class="stack">
+      <div class="range-row">
+        ${PROGRESS_RANGES.map(
+          (range) => `
+            <button
+              class="chip ${range.key === state.selectedBodyWeightRange ? "active" : ""}"
+              data-action="select-body-weight-range"
+              data-range="${range.key}"
+            >
+              ${range.label}
+            </button>
+          `
+        ).join("")}
+      </div>
+
+      ${renderBodyWeightComposerCard()}
+
+      ${renderBodyWeightStatsStrip(summary)}
+
+      ${
+        filteredEntries.length
+          ? renderBodyWeightChartCard(filteredEntries, summary)
+          : `
+            <section class="card progress-panel body-weight-panel">
+              <div class="section-title">Вес тела</div>
+              <p class="muted-note">
+                В этом диапазоне пока нет записей. Сохрани первое значение, и здесь появится график.
+              </p>
+            </section>
+          `
+      }
+    </section>
+  `;
+}
+
+function renderBodyWeightStatsStrip(summary) {
+  return `
+    <section class="body-weight-stats-block">
+      <div class="body-weight-stats-strip">
+        ${renderBodyWeightStatChip(
+          "Последний",
+          summary.latestOverallEntry ? `${formatWeight(summary.latestOverallEntry.weight)} кг` : "—"
+        )}
+        ${renderBodyWeightStatChip(
+          "Дельта",
+          summary.totalEntries ? formatSignedBodyWeight(summary.delta) : "—"
+        )}
+        ${renderBodyWeightStatChip("Записей", String(summary.totalEntries))}
+      </div>
+    </section>
+  `;
+}
+
+function renderBodyWeightStatChip(label, value) {
+  return `
+    <article class="body-weight-stat-chip">
+      <div class="body-weight-stat-label">${escapeHtml(label)}</div>
+      <div class="body-weight-stat-value">${escapeHtml(value)}</div>
+    </article>
+  `;
+}
+
+function renderBodyWeightComposerCard() {
+  return `
+    <section class="card progress-panel body-weight-panel">
+      <div class="body-weight-inline-form">
+        <label
+          class="pill body-weight-date-chip"
+          title="${escapeHtml(formatLongDate(state.bodyWeightDate))}"
+        >
+          <span class="body-weight-date-text">${escapeHtml(formatTopbarWorkoutDate(state.bodyWeightDate))}</span>
+          <input
+            class="body-weight-date-input"
+            type="date"
+            value="${escapeHtml(state.bodyWeightDate)}"
+            data-action="change-body-weight-date"
+            aria-label="Дата веса тела"
+          />
+        </label>
+
+        <div class="body-weight-input-wrap">
+          <input
+            id="body-weight-value"
+            class="date-input body-weight-input body-weight-number-input"
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="82,4"
+            value="${escapeHtml(state.bodyWeightValue)}"
+            data-action="change-body-weight-value"
+            aria-label="Вес тела"
+          />
+          <span class="body-weight-unit">кг</span>
+        </div>
+      </div>
+
+      <button
+        class="primary-button body-weight-save-button"
+        data-action="save-body-weight"
+        ${state.isSavingBodyWeight ? "disabled" : ""}
+      >
+        ${state.isSavingBodyWeight ? "Сохраняю..." : "Сохранить вес"}
+      </button>
+    </section>
+  `;
+}
+
+function renderBodyWeightChartCard(entries, summary) {
+  const values = entries.map((entry) => Number(entry.weight) || 0);
+  const width = 640;
+  const height = 292;
+  const leftPadding = 18;
+  const rightPadding = 20;
+  const top = 22;
+  const bottom = 36;
+  const points = buildChartPointsWithInsets(
+    values,
+    width,
+    height,
+    leftPadding,
+    rightPadding,
+    top,
+    bottom
+  );
+  const yAxisMarks = buildChartValueMarks(values, height, top, bottom);
+
+  return `
+    <section class="card progress-panel body-weight-panel">
+      <div class="progress-panel-head">
+        <div>
+          <div class="section-title">График веса</div>
+          <div class="metric-subtitle">
+            ${summary.latestEntry
+              ? `Последняя запись: ${formatBodyWeightValue(summary.latestEntry.weight)} кг • ${escapeHtml(formatShortDate(summary.latestEntry.entry_date))}`
+              : "Добавляй вес регулярно, чтобы видеть динамику."}
+          </div>
+        </div>
+      </div>
+
+      <div class="progress-chart-wrap body-weight-chart-wrap">
+        <div class="body-weight-chart-layout">
+          <div class="body-weight-y-axis" aria-hidden="true">
+            ${yAxisMarks
+              .map(
+                (mark) => `
+                  <span
+                    class="body-weight-y-axis-label"
+                    style="top:${((mark.y / height) * 100).toFixed(3)}%;"
+                  >
+                    ${escapeHtml(formatBodyWeightValue(mark.value))}
+                  </span>
+                `
+              )
+              .join("")}
+          </div>
+
+          <div class="body-weight-chart-main">
+            <svg class="progress-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="График веса тела">
+              ${yAxisMarks
+                .map((mark) => {
+                  return `<line class="progress-grid-line" x1="${leftPadding}" y1="${mark.y}" x2="${width - rightPadding}" y2="${mark.y}"></line>`;
+                })
+                .join("")}
+              <polyline class="progress-line progress-line-body-weight" points="${buildPolyline(points)}"></polyline>
+              ${points
+                .map(
+                  (point, index) => `
+                    <circle
+                      class="body-weight-point-hit"
+                      cx="${point.x}"
+                      cy="${point.y}"
+                      r="18"
+                      data-action="delete-body-weight"
+                      data-entry-id="${entries[index].id}"
+                    ></circle>
+                    <circle
+                      class="progress-point progress-point-body-weight"
+                      cx="${point.x}"
+                      cy="${point.y}"
+                      r="5"
+                      data-action="delete-body-weight"
+                      data-entry-id="${entries[index].id}"
+                    ></circle>
+                    <title>${escapeHtml(
+                      `${formatShortDate(entries[index].entry_date)} · ${formatBodyWeightValue(entries[index].weight)} кг`
+                    )}</title>
+                  `
+                )
+                .join("")}
+            </svg>
+          </div>
+
+          <div class="progress-axis-row body-weight-axis-row">
+            <span>${escapeHtml(formatShortDate(entries[0].entry_date))}</span>
+            <span>${escapeHtml(formatShortDate(entries[entries.length - 1].entry_date))}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderMetricCard(title, value, subtitle = "") {
   return `
     <article class="card metric-card">
@@ -2724,17 +3152,55 @@ function renderExerciseProgressChart(series) {
 }
 
 function buildChartPoints(values, width, height, paddingX, top, bottom) {
-  const innerWidth = width - paddingX * 2;
+  return buildChartPointsWithInsets(values, width, height, paddingX, paddingX, top, bottom);
+}
+
+function buildChartPointsWithInsets(values, width, height, leftPadding, rightPadding, top, bottom) {
+  const innerWidth = width - leftPadding - rightPadding;
   const innerHeight = height - top - bottom;
   const min = Math.min(...values);
   const max = Math.max(...values);
 
   return values.map((value, index) => {
     const x =
-      values.length === 1 ? width / 2 : paddingX + (index * innerWidth) / (values.length - 1);
+      values.length === 1
+        ? leftPadding + innerWidth / 2
+        : leftPadding + (index * innerWidth) / (values.length - 1);
     const ratio = max === min ? 0.5 : (value - min) / (max - min);
     const y = top + innerHeight - ratio * innerHeight;
     return { x, y };
+  });
+}
+
+function buildChartAxisMarks(min, max, width, height, leftPadding, rightPadding, top, bottom) {
+  const innerHeight = height - top - bottom;
+  const safeMin = Number.isFinite(min) ? min : 0;
+  const safeMax = Number.isFinite(max) ? max : safeMin;
+  const markValues =
+    safeMax === safeMin
+      ? [safeMax + 1, safeMax, Math.max(0, safeMin - 1)]
+      : [safeMax, safeMin + (safeMax - safeMin) * (2 / 3), safeMin + (safeMax - safeMin) * (1 / 3), safeMin];
+
+  return markValues.map((value) => {
+    const ratio = safeMax === safeMin ? 0.5 : (value - safeMin) / (safeMax - safeMin);
+    const y = top + innerHeight - ratio * innerHeight;
+    return { value, y };
+  });
+}
+
+function buildChartValueMarks(values, height, top, bottom) {
+  const numericValues = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  const uniqueValues = Array.from(new Set(numericValues)).sort((a, b) => b - a);
+  const innerHeight = height - top - bottom;
+  const safeMin = uniqueValues.length ? uniqueValues[uniqueValues.length - 1] : 0;
+  const safeMax = uniqueValues.length ? uniqueValues[0] : safeMin;
+
+  return uniqueValues.map((value) => {
+    const ratio = safeMax === safeMin ? 0.5 : (value - safeMin) / (safeMax - safeMin);
+    const y = top + innerHeight - ratio * innerHeight;
+    return { value, y };
   });
 }
 
@@ -3027,6 +3493,7 @@ function renderBottomNav() {
   const items = [
     { key: "trainings", label: "Trainings", icon: "trainings" },
     { key: "progress", label: "Progress", icon: "progress" },
+    { key: "body", label: "Weight", icon: "body-weight" },
   ];
 
   return `
@@ -3186,9 +3653,58 @@ function formatWeight(value) {
   return formatter.format(value);
 }
 
+function formatBodyWeightValue(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+  return numericValue.toLocaleString("ru-RU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 20,
+    useGrouping: false,
+  });
+}
+
+function formatBodyWeightInput(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+  return Number.isInteger(numericValue) ? String(numericValue) : numericValue.toFixed(1);
+}
+
+function normalizeBodyWeightInput(value) {
+  const raw = String(value || "").replace(/[^\d.,]/g, "").replace(/,/g, ".");
+  if (!raw) {
+    return "";
+  }
+
+  const firstDotIndex = raw.indexOf(".");
+  if (firstDotIndex === -1) {
+    return raw;
+  }
+
+  const integerPart = raw.slice(0, firstDotIndex);
+  const fractionPart = raw.slice(firstDotIndex + 1).replace(/\./g, "");
+  if (!fractionPart && raw.endsWith(".")) {
+    return `${integerPart || "0"}.`;
+  }
+
+  return `${integerPart || "0"}.${fractionPart}`;
+}
+
 function formatSignedWeight(value) {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${formatWeight(value)} кг`;
+}
+
+function formatSignedBodyWeight(value) {
+  if (!Number.isFinite(Number(value))) {
+    return "—";
+  }
+  const numericValue = Number(value);
+  const prefix = numericValue > 0 ? "+" : "";
+  return `${prefix}${formatWeight(numericValue)} кг`;
 }
 
 function formatSignedCount(value) {
@@ -3260,6 +3776,17 @@ function iconMarkup(name) {
         <path d="M5 18V9"></path>
         <path d="M12 18V5"></path>
         <path d="M19 18v-6"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "body-weight") {
+    return `
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9A2.5 2.5 0 0 1 6.5 5z"></path>
+        <path d="M9 9.5A3.5 3.5 0 0 1 12 8a3.5 3.5 0 0 1 3 1.5"></path>
+        <path d="M12 8v4"></path>
+        <path d="M8.5 14.5h7"></path>
       </svg>
     `;
   }

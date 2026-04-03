@@ -7,6 +7,7 @@ from support import (
     JsonHttpClient,
     build_signed_init_data,
     running_miniapp_server,
+    sample_body_weight_payload,
     sample_workout_payload,
 )
 
@@ -347,6 +348,25 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(response.status, 401)
             self.assertIn("No active session", response.payload["reason"])
 
+    def test_get_body_weights_uses_debug_fallback_cookie_when_enabled(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("GET", "/api/body-weights")
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["user"]["auth_source"], "debug")
+            self.assertEqual(response.payload["entries"], [])
+
+    def test_get_body_weights_requires_session_when_debug_is_disabled(self) -> None:
+        with running_miniapp_server(allow_debug_user=False) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json("GET", "/api/body-weights")
+
+            self.assertEqual(response.status, 401)
+            self.assertIn("No active session", response.payload["reason"])
+
     def test_workouts_endpoint_rejects_invalid_payload(self) -> None:
         with running_miniapp_server(allow_debug_user=True) as app:
             client = JsonHttpClient(app.base_url)
@@ -478,6 +498,79 @@ class ServerApiTest(unittest.TestCase):
 
             self.assertEqual(response.status, 404)
             self.assertIn("Workout not found", response.payload["reason"])
+
+    def test_body_weights_endpoint_saves_and_updates_entries_via_api(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            created_response = client.request_json(
+                "POST",
+                "/api/body-weights",
+                sample_body_weight_payload(entry_date="2026-03-27", weight=82.4),
+            )
+            updated_response = client.request_json(
+                "POST",
+                "/api/body-weights",
+                sample_body_weight_payload(entry_date="2026-03-27", weight=81.9, notes=" Updated "),
+            )
+            list_response = client.request_json("GET", "/api/body-weights")
+
+            self.assertEqual(created_response.status, 201)
+            self.assertTrue(created_response.payload["created"])
+            self.assertEqual(updated_response.status, 200)
+            self.assertFalse(updated_response.payload["created"])
+            self.assertEqual(updated_response.payload["entry"]["weight"], 81.9)
+            self.assertEqual(updated_response.payload["entry"]["notes"], "Updated")
+            self.assertEqual(len(list_response.payload["entries"]), 1)
+
+    def test_body_weights_endpoint_rejects_invalid_payload(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            response = client.request_json(
+                "POST",
+                "/api/body-weights",
+                {
+                    "entry_date": "2026-03-28",
+                    "weight": 0,
+                },
+            )
+
+            self.assertEqual(response.status, 400)
+            self.assertIn("greater than 0", response.payload["reason"])
+
+    def test_body_weights_endpoint_deletes_entry_via_api(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            created_response = client.request_json(
+                "POST",
+                "/api/body-weights",
+                sample_body_weight_payload(entry_date="2026-03-27", weight=82.4),
+            )
+            delete_response = client.request_json(
+                "DELETE",
+                f"/api/body-weights/{created_response.payload['entry']['id']}",
+            )
+            list_response = client.request_json("GET", "/api/body-weights")
+
+            self.assertEqual(delete_response.status, 200)
+            self.assertTrue(delete_response.payload["deleted"])
+            self.assertEqual(delete_response.payload["entry"]["entry_date"], "2026-03-27")
+            self.assertEqual(list_response.payload["entries"], [])
+
+    def test_body_weights_endpoint_returns_not_found_for_missing_delete(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            response = client.request_json("DELETE", "/api/body-weights/999999")
+
+            self.assertEqual(response.status, 404)
+            self.assertIn("not found", response.payload["reason"].lower())
 
     def test_telegram_auth_endpoint_reports_empty_initdata(self) -> None:
         with running_miniapp_server(allow_debug_user=False) as app:

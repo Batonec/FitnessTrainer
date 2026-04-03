@@ -239,6 +239,26 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/body-weights":
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            entries = STORE.list_body_weights(int(user["id"]))
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "user": user, "entries": entries},
+                extra_headers=headers,
+            )
+            return
+
         static_path = self._resolve_static_path(path)
         if static_path is not None:
             self._send_file(static_path)
@@ -437,6 +457,35 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/body-weights":
+            payload = self._read_json_body()
+            if payload is None:
+                return
+
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            try:
+                entry, created = STORE.save_body_weight(int(user["id"]), payload)
+            except ValueError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": str(exc)})
+                return
+
+            self._send_json(
+                HTTPStatus.CREATED if created else HTTPStatus.OK,
+                {"ok": True, "created": created, "user": user, "entry": entry},
+                extra_headers=headers,
+            )
+            return
+
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
 
     def do_PUT(self) -> None:
@@ -479,6 +528,31 @@ class MiniAppHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
+        body_weight_id = self._parse_body_weight_id(path)
+        if body_weight_id is not None:
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            entry = STORE.delete_body_weight(int(user["id"]), body_weight_id)
+            if entry is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Body weight entry not found"})
+                return
+
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "user": user, "entry": entry, "deleted": True},
+                extra_headers=headers,
+            )
+            return
+
         workout_id = self._parse_workout_id(path)
         if workout_id is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "reason": "Not found"})
@@ -570,6 +644,20 @@ class MiniAppHandler(BaseHTTPRequestHandler):
 
     def _parse_workout_id(self, path: str) -> int | None:
         prefix = "/api/workouts/"
+        if not path.startswith(prefix):
+            return None
+
+        raw_id = path.removeprefix(prefix).strip("/")
+        if not raw_id or "/" in raw_id:
+            return None
+
+        try:
+            return int(raw_id)
+        except ValueError:
+            return None
+
+    def _parse_body_weight_id(self, path: str) -> int | None:
+        prefix = "/api/body-weights/"
         if not path.startswith(prefix):
             return None
 

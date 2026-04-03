@@ -527,6 +527,71 @@ class MiniAppE2ETest(unittest.TestCase):
         self.assertTrue(self.page.evaluate("window.Telegram.WebApp.isFullscreen"))
         self.assertFalse(self.page.evaluate("window.Telegram.WebApp.isVerticalSwipesEnabled"))
 
+    def test_body_weight_screen_can_save_entry_and_render_chart(self) -> None:
+        self.open_app()
+
+        self.page.locator('[data-action="switch-tab"][data-tab="body"]').click()
+        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Вес тела")
+
+        self.page.locator('[data-action="change-body-weight-value"]').fill("82.4")
+        self.page.locator('[data-action="save-body-weight"]').click()
+
+        expect(self.page.locator(".toast")).to_contain_text("Вес тела сохранён")
+        expect(self.page.locator(".body-weight-stats-strip")).to_contain_text("82,4 кг")
+        expect(self.page.locator(".body-weight-chart-wrap")).to_be_visible()
+
+    def test_body_weight_screen_prefills_existing_entry_for_selected_date(self) -> None:
+        client = self.telegram_seed_client()
+        client.request_json(
+            "POST",
+            "/api/body-weights",
+            {
+                "entry_date": "2026-03-28",
+                "weight": 81.3,
+                "notes": None,
+            },
+        )
+
+        self.open_app()
+        self.page.locator('[data-action="switch-tab"][data-tab="body"]').click()
+        self.page.locator('[data-action="change-body-weight-date"]').fill("2026-03-28")
+
+        expect(self.page.locator('[data-action="change-body-weight-value"]')).to_have_value("81.3")
+
+    def test_body_weight_chart_flow_can_delete_entry_after_confirmation(self) -> None:
+        self.telegram_seed_client().request_json(
+            "POST",
+            "/api/body-weights",
+            {
+                "entry_date": "2026-03-28",
+                "weight": 81.3,
+                "notes": None,
+            },
+        )
+
+        self.open_app()
+        self.page.locator('[data-action="switch-tab"][data-tab="body"]').click()
+        expect(self.page.locator(".body-weight-chart-wrap")).to_be_visible()
+
+        entry_id = self.page.evaluate("window.__trainerMiniAppTestApi.getBodyWeightEntries()[0].id")
+        self.respond_to_next_dialog(accept=True, contains="Удалить запись веса")
+        self.page.evaluate(
+            "(entryId) => window.__trainerMiniAppTestApi.deleteBodyWeightEntry(entryId)",
+            entry_id,
+        )
+
+        self.page.wait_for_function(
+            "() => window.__trainerMiniAppTestApi.getBodyWeightEntries().length === 0"
+        )
+        self.assertEqual(
+            self.page.evaluate("window.__trainerMiniAppTestApi.getBodyWeightEntries()"),
+            [],
+        )
+        self.assertEqual(
+            self.page.evaluate("window.__trainerMiniAppTestApi.getBodyWeightValue()"),
+            "",
+        )
+
     def test_open_swipe_card_can_be_closed_by_swiping_right(self) -> None:
         self.seed_single_workout(
             client_id="swipe-close-right-test",

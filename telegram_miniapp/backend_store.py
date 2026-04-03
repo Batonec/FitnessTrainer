@@ -122,6 +122,28 @@ def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], 
     return normalized_payload, client_id
 
 
+def normalize_body_weight_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    entry_date = str(payload.get("entry_date", "")).strip()
+    try:
+        date.fromisoformat(entry_date)
+    except ValueError as exc:
+        raise ValueError("entry_date must be in YYYY-MM-DD format")
+
+    try:
+        weight = float(payload.get("weight", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("weight must be numeric") from exc
+
+    if weight <= 0:
+        raise ValueError("weight must be greater than 0")
+
+    return {
+        "entry_date": entry_date,
+        "weight": weight,
+        "notes": normalize_notes(payload.get("notes")),
+    }
+
+
 class MiniAppStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -173,6 +195,20 @@ class MiniAppStore:
 
                 CREATE INDEX IF NOT EXISTS idx_workouts_user_date
                 ON workouts(user_id, workout_date DESC, id DESC);
+
+                CREATE TABLE IF NOT EXISTS body_weights (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    entry_date TEXT NOT NULL,
+                    weight REAL NOT NULL,
+                    notes TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    UNIQUE(user_id, entry_date)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_body_weights_user_date
+                ON body_weights(user_id, entry_date ASC, id ASC);
                 """
             )
 
@@ -410,6 +446,116 @@ class MiniAppStore:
 
         return self._deserialize_workout(existing)
 
+    def list_body_weights(self, user_id: int) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, user_id, entry_date, weight, notes, created_at, updated_at
+                FROM body_weights
+                WHERE user_id = ?
+                ORDER BY entry_date ASC, id ASC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._deserialize_body_weight(row) for row in rows]
+
+    def save_body_weight(self, user_id: int, payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        normalized_payload = normalize_body_weight_payload(payload)
+        timestamp = utc_now()
+
+        with self._connection() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, user_id, entry_date, weight, notes, created_at, updated_at
+                FROM body_weights
+                WHERE user_id = ? AND entry_date = ?
+                """,
+                (user_id, normalized_payload["entry_date"]),
+            ).fetchone()
+
+            if existing is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO body_weights (
+                        user_id,
+                        entry_date,
+                        weight,
+                        notes,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        normalized_payload["entry_date"],
+                        normalized_payload["weight"],
+                        normalized_payload["notes"],
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT id, user_id, entry_date, weight, notes, created_at, updated_at
+                    FROM body_weights
+                    WHERE id = ?
+                    """,
+                    (cursor.lastrowid,),
+                ).fetchone()
+                created = True
+            else:
+                connection.execute(
+                    """
+                    UPDATE body_weights
+                    SET weight = ?, notes = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (
+                        normalized_payload["weight"],
+                        normalized_payload["notes"],
+                        timestamp,
+                        existing["id"],
+                        user_id,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT id, user_id, entry_date, weight, notes, created_at, updated_at
+                    FROM body_weights
+                    WHERE id = ?
+                    """,
+                    (existing["id"],),
+                ).fetchone()
+                created = False
+
+        if row is None:
+            raise RuntimeError("Failed to persist body weight entry")
+        return self._deserialize_body_weight(row), created
+
+    def delete_body_weight(self, user_id: int, entry_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, entry_date, weight, notes, created_at, updated_at
+                FROM body_weights
+                WHERE id = ? AND user_id = ?
+                """,
+                (entry_id, user_id),
+            ).fetchone()
+            if row is None:
+                return None
+
+            connection.execute(
+                """
+                DELETE FROM body_weights
+                WHERE id = ? AND user_id = ?
+                """,
+                (entry_id, user_id),
+            )
+
+        return self._deserialize_body_weight(row)
+
     def _get_workout_row(
         self,
         connection: sqlite3.Connection,
@@ -451,4 +597,14 @@ class MiniAppStore:
             "debug_alias": row["debug_alias"],
             "is_default_debug_user": row["auth_source"] == "debug",
             "display_name": display_name,
+        }
+
+    def _deserialize_body_weight(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "entry_date": row["entry_date"],
+            "weight": float(row["weight"]),
+            "notes": row["notes"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
         }

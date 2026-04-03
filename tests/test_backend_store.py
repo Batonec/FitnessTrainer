@@ -4,14 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import MINIAPP_DIR, sample_workout_payload
+from support import MINIAPP_DIR, sample_body_weight_payload, sample_workout_payload
 
 import sys
 
 if str(MINIAPP_DIR) not in sys.path:
     sys.path.insert(0, str(MINIAPP_DIR))
 
-from backend_store import MiniAppStore, normalize_workout_payload
+from backend_store import MiniAppStore, normalize_body_weight_payload, normalize_workout_payload
 
 
 class MiniAppStoreTest(unittest.TestCase):
@@ -286,6 +286,85 @@ class MiniAppStoreTest(unittest.TestCase):
 
         self.assertIsNone(deleted_workout)
         self.assertEqual(len(self.store.list_workouts(int(first_user["id"]))), 1)
+
+    def test_save_body_weight_creates_new_entry(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+
+        entry, created = self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-27", weight=82.4),
+        )
+
+        self.assertTrue(created)
+        self.assertEqual(entry["entry_date"], "2026-03-27")
+        self.assertEqual(entry["weight"], 82.4)
+        self.assertEqual(self.store.list_body_weights(int(user["id"])), [entry])
+
+    def test_save_body_weight_upserts_same_date_for_same_user(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+        first_entry, first_created = self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-27", weight=82.4),
+        )
+        second_entry, second_created = self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-27", weight=81.9, notes=" Updated "),
+        )
+
+        self.assertTrue(first_created)
+        self.assertFalse(second_created)
+        self.assertEqual(first_entry["id"], second_entry["id"])
+        self.assertEqual(second_entry["weight"], 81.9)
+        self.assertEqual(second_entry["notes"], "Updated")
+        self.assertEqual(len(self.store.list_body_weights(int(user["id"]))), 1)
+
+    def test_list_body_weights_orders_entries_from_oldest_to_newest(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+        self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-28", weight=82.0),
+        )
+        self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-25", weight=83.0),
+        )
+        self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-26", weight=82.7),
+        )
+
+        entries = self.store.list_body_weights(int(user["id"]))
+
+        self.assertEqual(
+            [entry["entry_date"] for entry in entries],
+            ["2026-03-25", "2026-03-26", "2026-03-28"],
+        )
+
+    def test_delete_body_weight_removes_existing_entry(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+        entry, _ = self.store.save_body_weight(
+            int(user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-27", weight=82.4),
+        )
+
+        deleted_entry = self.store.delete_body_weight(int(user["id"]), int(entry["id"]))
+
+        self.assertIsNotNone(deleted_entry)
+        self.assertEqual(deleted_entry["id"], entry["id"])
+        self.assertEqual(self.store.list_body_weights(int(user["id"])), [])
+
+    def test_delete_body_weight_returns_none_for_other_user(self) -> None:
+        first_user = self.store.ensure_debug_user("browser-default")
+        second_user = self.store.upsert_telegram_user({"id": 902001, "first_name": "Other"})
+        entry, _ = self.store.save_body_weight(
+            int(first_user["id"]),
+            sample_body_weight_payload(entry_date="2026-03-27", weight=82.4),
+        )
+
+        deleted_entry = self.store.delete_body_weight(int(second_user["id"]), int(entry["id"]))
+
+        self.assertIsNone(deleted_entry)
+        self.assertEqual(len(self.store.list_body_weights(int(first_user["id"]))), 1)
 
 
 class NormalizeWorkoutPayloadTest(unittest.TestCase):
@@ -606,6 +685,39 @@ class NormalizeWorkoutPayloadTest(unittest.TestCase):
                         "load_type": None,
                         "exercises": [{"exercise_id": 1, "name": "Bench", "sets": [{"reps": 10, "weight": 80}]}],
                     },
+                }
+            )
+
+
+class NormalizeBodyWeightPayloadTest(unittest.TestCase):
+    def test_normalizes_valid_body_weight_payload(self) -> None:
+        payload = normalize_body_weight_payload(
+            {
+                "entry_date": "2026-03-28",
+                "weight": "82.4",
+                "notes": "  Morning  ",
+            }
+        )
+
+        self.assertEqual(payload["entry_date"], "2026-03-28")
+        self.assertEqual(payload["weight"], 82.4)
+        self.assertEqual(payload["notes"], "Morning")
+
+    def test_rejects_invalid_body_weight_date(self) -> None:
+        with self.assertRaisesRegex(ValueError, "YYYY-MM-DD"):
+            normalize_body_weight_payload(
+                {
+                    "entry_date": "28-03-2026",
+                    "weight": 82.4,
+                }
+            )
+
+    def test_rejects_non_positive_body_weight(self) -> None:
+        with self.assertRaisesRegex(ValueError, "greater than 0"):
+            normalize_body_weight_payload(
+                {
+                    "entry_date": "2026-03-28",
+                    "weight": 0,
                 }
             )
 

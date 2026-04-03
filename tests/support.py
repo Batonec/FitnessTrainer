@@ -61,6 +61,19 @@ def sample_workout_payload(
     }
 
 
+def sample_body_weight_payload(
+    *,
+    entry_date: str = "2026-03-28",
+    weight: float = 82.4,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "entry_date": entry_date,
+        "weight": weight,
+        "notes": notes,
+    }
+
+
 def build_signed_init_data(
     bot_token: str,
     *,
