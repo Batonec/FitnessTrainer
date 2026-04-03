@@ -1352,6 +1352,25 @@ button {
   margin-top: 10px;
 }
 
+.exercise-picker-complete {
+  padding: 8px 2px 4px;
+  text-align: center;
+}
+
+.exercise-picker-complete-title {
+  color: var(--page-ink);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.exercise-picker-complete-text {
+  margin-top: 4px;
+  color: var(--page-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .exercise-tile-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

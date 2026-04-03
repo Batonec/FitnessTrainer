@@ -899,11 +899,15 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     return {
       primary: [],
       secondary: [],
+      primaryPoolExhausted: false,
     };
   }
 
   const stats = buildExerciseUsageStats(workouts);
-  const rankedAvailable = available.map((exercise, catalogIndex) => {
+  const catalogExercises = Array.isArray(state.exercises) && state.exercises.length
+    ? state.exercises
+    : available;
+  const rankedCatalog = catalogExercises.map((exercise, catalogIndex) => {
     const exerciseStats = stats.get(exercise.id) || null;
     return {
       exercise,
@@ -914,7 +918,7 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     };
   });
 
-  const rankedByImportance = [...rankedAvailable].sort((left, right) => {
+  const rankedByImportance = [...rankedCatalog].sort((left, right) => {
     if (right.count !== left.count) {
       return right.count - left.count;
     }
@@ -931,16 +935,21 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     .filter((item) => item.count > 0)
     .slice(0, 6);
 
-  if (!suggestedPool.length) {
+  const primaryPool = suggestedPool.length ? suggestedPool : rankedByImportance.slice(0, 6);
+  const primaryIds = new Set(primaryPool.map((item) => item.exercise.id));
+  const rankedAvailable = available.map((exercise, catalogIndex) => {
+    const exerciseStats = stats.get(exercise.id) || null;
     return {
-      primary: rankedByImportance.slice(0, 6).map((item) => item.exercise),
-      secondary: rankedByImportance.slice(6).map((item) => item.exercise),
+      exercise,
+      count: exerciseStats?.count ?? 0,
+      averagePosition: exerciseStats?.averagePosition ?? Number.POSITIVE_INFINITY,
+      latestWorkoutDate: exerciseStats?.latestWorkoutDate ?? "",
+      catalogIndex,
     };
-  }
+  });
 
-  const suggestedIds = new Set(suggestedPool.map((item) => item.exercise.id));
   const primary = rankedAvailable
-    .filter((item) => suggestedIds.has(item.exercise.id))
+    .filter((item) => primaryIds.has(item.exercise.id))
     .sort((left, right) => {
       if (left.averagePosition !== right.averagePosition) {
         return left.averagePosition - right.averagePosition;
@@ -956,7 +965,7 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     .map((item) => item.exercise);
 
   const secondary = rankedAvailable
-    .filter((item) => !suggestedIds.has(item.exercise.id))
+    .filter((item) => !primaryIds.has(item.exercise.id))
     .sort((left, right) => {
       if (right.count !== left.count) {
         return right.count - left.count;
@@ -968,7 +977,11 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     })
     .map((item) => item.exercise);
 
-  return { primary, secondary };
+  return {
+    primary,
+    secondary,
+    primaryPoolExhausted: primaryPool.length > 0 && primary.length === 0 && secondary.length > 0,
+  };
 }
 
 function buildExerciseUsageStats(workouts) {
@@ -3382,7 +3395,11 @@ function renderCurrentExerciseCard(exerciseName) {
 }
 
 function renderExercisePicker(exercises) {
-  const { primary: primaryExercises, secondary: secondaryExercises } =
+  const {
+    primary: primaryExercises,
+    secondary: secondaryExercises,
+    primaryPoolExhausted,
+  } =
     getExercisePickerGroups(exercises);
   const shouldShowMoreToggle = secondaryExercises.length > 0;
   const shouldShowSecondary = state.showAllExerciseOptions && shouldShowMoreToggle;
@@ -3396,6 +3413,15 @@ function renderExercisePicker(exercises) {
               ${renderExerciseTileGrid(primaryExercises)}
             </div>
           `
+          : primaryPoolExhausted
+            ? `
+              <div class="exercise-picker-complete">
+                <div class="exercise-picker-complete-title">Круто, тренировка закончена</div>
+                <div class="exercise-picker-complete-text">
+                  Основная плитка уже закончилась, но ниже можно раскрыть остальные упражнения.
+                </div>
+              </div>
+            `
           : exercises.length
             ? renderExerciseTileGrid(exercises)
             : `<p class="muted-note">В локальной базе не осталось свободных упражнений.</p>`
