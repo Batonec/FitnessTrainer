@@ -70,6 +70,7 @@ let hasOpenNewHistoryEntry = false;
 let workoutSwipeGesture = null;
 let swipeClickGuard = null;
 let pendingScreenTransition = false;
+let pendingDraftExerciseScrollId = null;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
@@ -937,6 +938,18 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
 
   const primaryPool = suggestedPool.length ? suggestedPool : rankedByImportance.slice(0, 6);
   const primaryIds = new Set(primaryPool.map((item) => item.exercise.id));
+  const replacementCandidate = rankedByImportance.find(
+    (item) => item.exercise.id !== 1 && !primaryIds.has(item.exercise.id)
+  );
+
+  // `Жим гор.` should always stay in the rare bucket for manual access only.
+  if (primaryIds.has(1)) {
+    primaryIds.delete(1);
+    if (replacementCandidate) {
+      primaryIds.add(replacementCandidate.exercise.id);
+    }
+  }
+
   const rankedAvailable = available.map((exercise, catalogIndex) => {
     const exerciseStats = stats.get(exercise.id) || null;
     return {
@@ -1079,7 +1092,13 @@ function selectExercise(exerciseId, { openSetEditor = true } = {}) {
     return;
   }
 
+  const isNewExercise = !state.workoutExercises.some(
+    (exercise) => exercise.exerciseId === selectedExercise.id
+  );
   focusDraftExercise(selectedExercise.id);
+  if (isNewExercise) {
+    pendingDraftExerciseScrollId = selectedExercise.id;
+  }
   if (openSetEditor) {
     state.currentSetReps = 12;
     state.currentSetWeight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
@@ -1301,6 +1320,9 @@ function startAddingSetForExercise(exerciseId) {
 }
 
 function cancelAddingSet() {
+  if (state.activeSetEditor?.exerciseId) {
+    pendingDraftExerciseScrollId = Number(state.activeSetEditor.exerciseId);
+  }
   state.isAddingSet = false;
   state.activeSetEditor = null;
   render();
@@ -1358,6 +1380,7 @@ function addSetToExercise(exerciseId, setData) {
   }
 
   focusDraftExercise(selectedExercise.id);
+  pendingDraftExerciseScrollId = selectedExercise.id;
   const existingIndex = state.workoutExercises.findIndex(
     (exercise) => exercise.exerciseId === selectedExercise.id
   );
@@ -1970,6 +1993,56 @@ function flushPendingScrollRestore() {
   });
 }
 
+function flushPendingDraftExerciseScroll() {
+  if (!Number.isFinite(Number(pendingDraftExerciseScrollId))) {
+    return;
+  }
+
+  const targetExerciseId = Number(pendingDraftExerciseScrollId);
+  pendingDraftExerciseScrollId = null;
+
+  window.requestAnimationFrame(() => {
+    const card = root.querySelector(`[data-draft-exercise-id="${targetExerciseId}"]`);
+    if (!card) {
+      return;
+    }
+
+    const cardRect = card.getBoundingClientRect();
+    const topbarRect = root.querySelector(".topbar")?.getBoundingClientRect() ?? null;
+    const visibleTop = (topbarRect?.bottom ?? 0) + 12;
+    const blockers = Array.from(
+      root.querySelectorAll(".floating-action-button, .bottom-nav-wrap")
+    )
+      .map((element) => element.getBoundingClientRect())
+      .filter((rect) => Number.isFinite(rect.top) && rect.height > 0);
+    const blockerTop = blockers.length
+      ? Math.min(...blockers.map((rect) => rect.top))
+      : window.innerHeight;
+    const pickerPreviewHeight = root.querySelector(".exercise-picker") ? 84 : 0;
+    const visibleBottom = blockerTop - 12;
+    const preferredBottom = visibleBottom - pickerPreviewHeight;
+    const fullyVisible = cardRect.top >= visibleTop && cardRect.bottom <= preferredBottom;
+
+    if (fullyVisible) {
+      return;
+    }
+
+    let nextTop = getScrollTop();
+
+    if (cardRect.top < visibleTop) {
+      nextTop += cardRect.top - visibleTop;
+    } else if (cardRect.bottom > preferredBottom) {
+      nextTop += cardRect.bottom - preferredBottom;
+    }
+
+    nextTop = Math.max(0, nextTop);
+    window.scrollTo({
+      top: nextTop,
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth",
+    });
+  });
+}
+
 function syncBrowserHistory(mode = "replace") {
   if (!window.history?.replaceState) {
     return;
@@ -2366,6 +2439,7 @@ function render() {
   pendingScreenTransition = false;
   updateTelegramBackButton();
   flushPendingScrollRestore();
+  flushPendingDraftExerciseScroll();
 }
 
 function renderTopbar() {
@@ -3291,7 +3365,10 @@ function renderNewWorkoutPlanSuggestionCard(plan) {
 
 function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard = false } = {}) {
   return `
-    <article class="surface-card exercise-card ${isSelected ? "exercise-card-active" : ""}">
+    <article
+      class="surface-card exercise-card ${isSelected ? "exercise-card-active" : ""}"
+      data-draft-exercise-id="${exercise.exerciseId}"
+    >
       <div class="draft-exercise-head">
         <div class="exercise-title-row">
           <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>

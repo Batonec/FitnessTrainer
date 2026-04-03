@@ -502,18 +502,94 @@ class MiniAppE2ETest(unittest.TestCase):
         picker = self.page.locator(".exercise-picker")
         for exercise_name in [
             "Жим ногами",
-            "Жим гор.",
             "Тяга верт.",
             "Дельты",
             "Бицепс",
             "Трицепс",
+            "Бабочка",
         ]:
             expect(picker).to_contain_text(exercise_name)
 
-        expect(picker).not_to_contain_text("Бабочка")
+        expect(picker).not_to_contain_text("Жим гор.")
+        expect(picker).not_to_contain_text("Жим в тренажере")
         self.page.locator('[data-action="toggle-more-exercises"]').click()
         expect(picker).to_contain_text("Скрыть редкие упражнения")
-        expect(picker).to_contain_text("Бабочка")
+        expect(picker).to_contain_text("Жим гор.")
+        expect(picker).to_contain_text("Жим в тренажере")
+
+    def test_exercise_picker_hides_already_added_primary_exercise(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        picker = self.page.locator(".exercise-picker")
+        leg_press_tile = picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
+        expect(leg_press_tile).to_have_count(1)
+
+        leg_press_tile.click()
+        self.page.locator('[data-action="set-cancel"]').click()
+
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(0)
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Трицепс")).to_have_count(1)
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.")).to_have_count(0)
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Бабочка")).to_have_count(1)
+
+    def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        for exercise_name in [
+            "Жим ногами",
+            "Тяга верт.",
+            "Дельты",
+            "Бицепс",
+            "Трицепс",
+            "Бабочка",
+        ]:
+            self.page.locator('[data-action="select-exercise"]').filter(has_text=exercise_name).click()
+            self.page.locator('[data-action="set-cancel"]').click()
+
+        picker = self.page.locator(".exercise-picker")
+        expect(picker.locator(".exercise-picker-complete-title")).to_contain_text("Круто, тренировка закончена")
+        expect(picker.locator(".exercise-picker-more-toggle")).to_contain_text("Ещё упражнения")
+        expect(picker).not_to_contain_text("Жим гор.")
+        expect(picker).not_to_contain_text("Жим в тренажере")
+
+        self.page.locator('[data-action="toggle-more-exercises"]').click()
+        expect(picker).to_contain_text("Скрыть редкие упражнения")
+        expect(picker).to_contain_text("Жим гор.")
+        expect(picker).to_contain_text("Жим в тренажере")
+
+    def test_newly_added_exercise_scrolls_above_fab_on_small_viewport(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.page.set_viewport_size({"width": 390, "height": 844})
+        self.open_app()
+        self.open_new_workout()
+
+        for exercise_name in ["Жим ногами", "Тяга верт.", "Дельты", "Бицепс"]:
+            self.page.locator('[data-action="select-exercise"]').filter(has_text=exercise_name).click()
+            self.page.locator('[data-action="set-cancel"]').click()
+            self.page.wait_for_timeout(150)
+
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Трицепс").click()
+        self.page.locator('[data-action="set-cancel"]').click()
+        self.page.wait_for_timeout(500)
+
+        last_card = self.page.locator('[data-draft-exercise-id="12"]').first
+        fab = self.page.locator('.floating-action-button-save').first
+        picker = self.page.locator(".exercise-picker").first
+
+        last_card_box = last_card.bounding_box()
+        fab_box = fab.bounding_box()
+        picker_box = picker.bounding_box()
+
+        self.assertIsNotNone(last_card_box)
+        self.assertIsNotNone(fab_box)
+        self.assertIsNotNone(picker_box)
+        self.assertLess(last_card_box["y"] + last_card_box["height"], fab_box["y"] - 8)
+        self.assertLess(picker_box["y"], fab_box["y"] - 8)
 
     def test_telegram_shell_requests_fullscreen_and_disables_vertical_swipes(self) -> None:
         self.open_app()
