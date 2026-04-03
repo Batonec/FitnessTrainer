@@ -553,6 +553,42 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(1)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(1)
 
+    def test_draft_exercise_card_uses_compact_inline_action_icons(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        self.add_default_set()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(card.locator('[data-action="continue-exercise"]')).to_have_attribute("title", "Добавить сет")
+        expect(card.locator('[data-action="continue-exercise"] svg')).to_have_count(1)
+        expect(card.locator('[data-action="remove-last-draft-set"]')).to_have_attribute("title", "Удалить последний сет")
+        expect(card.locator('[data-action="remove-last-draft-set"] svg')).to_have_count(1)
+        expect(card.locator('[data-action="quick-standard-set"]')).to_have_attribute("title", "Добавить стандартный сет")
+        expect(card.locator('[data-action="quick-standard-set"] svg')).to_have_count(1)
+        expect(card.locator('[data-action="remove-draft-exercise"]')).to_have_attribute("title", "Удалить упражнение")
+        expect(card.locator('[data-action="remove-draft-exercise"] svg')).to_have_count(1)
+        expect(card.locator(".set-row-remove-button")).to_have_count(0)
+
+    def test_draft_exercise_card_can_remove_last_set_from_header_action(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
+            '[data-action="continue-exercise"]'
+        ).click()
+        self.page.locator('[data-action="set-apply"]').click()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(card.locator(".set-row")).to_have_count(2)
+
+        card.locator('[data-action="remove-last-draft-set"]').click()
+        expect(card.locator(".set-row")).to_have_count(1)
+
     def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
@@ -571,6 +607,9 @@ class MiniAppE2ETest(unittest.TestCase):
 
         picker = self.page.locator(".exercise-picker")
         expect(picker.locator(".exercise-picker-complete-title")).to_contain_text("Круто, тренировка закончена")
+        expect(picker.locator(".exercise-picker-complete")).not_to_contain_text(
+            "Основная плитка уже закончилась"
+        )
         expect(picker.locator(".exercise-picker-more-toggle")).to_contain_text("Ещё упражнения")
         expect(picker).not_to_contain_text("Жим гор.")
         expect(picker).not_to_contain_text("Жим в тренажере")
@@ -940,9 +979,21 @@ class MiniAppE2ETest(unittest.TestCase):
         self.page.locator('[data-action="set-apply"]').click()
 
         expect(leg_press_card.locator(".set-row")).to_have_count(2)
-        expect(leg_press_card).to_contain_text("Сет 2")
+        expect(leg_press_card.locator(".set-row").nth(1).locator(".set-row-index")).to_have_text("2.")
         expect(leg_press_card).to_have_class(re.compile(r".*exercise-card-active.*"))
         expect(pull_down_card.locator(".set-row")).to_have_count(1)
+
+    def test_draft_set_rows_use_compact_numbered_format(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+
+        first_set = self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(".set-row").first
+        expect(first_set.locator(".set-row-index")).to_have_text("1.")
+        expect(first_set.locator(".set-row-value")).to_contain_text("кг ×")
+        expect(first_set).not_to_contain_text("Сет 1")
 
     def test_returning_from_new_restores_trainings_scroll_position(self) -> None:
         self.seed_workout_history()

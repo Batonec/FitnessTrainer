@@ -395,6 +395,9 @@ function handleClick(event) {
     case "remove-draft-set":
       removeDraftSet(Number(actionTarget.dataset.exerciseId), Number(actionTarget.dataset.setIndex));
       break;
+    case "remove-last-draft-set":
+      removeLastDraftSet(Number(actionTarget.dataset.exerciseId));
+      break;
     case "remove-draft-exercise":
       removeDraftExercise(Number(actionTarget.dataset.exerciseId));
       break;
@@ -1574,6 +1577,15 @@ function removeDraftSet(exerciseId, setIndex) {
   state.isAddingSet = false;
   persistDraft();
   render();
+}
+
+function removeLastDraftSet(exerciseId) {
+  const exercise = state.workoutExercises.find((item) => item.exerciseId === exerciseId);
+  if (!exercise || !exercise.sets.length) {
+    return;
+  }
+
+  removeDraftSet(exerciseId, exercise.sets.length - 1);
 }
 
 function removeDraftExercise(exerciseId) {
@@ -3723,7 +3735,7 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
       data-draft-exercise-id="${exercise.exerciseId}"
     >
       <div class="draft-exercise-head">
-        <div class="exercise-title-row">
+        <div class="exercise-title-row draft-exercise-title-row">
           <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
         </div>
         <div class="draft-exercise-actions">
@@ -3731,9 +3743,28 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
             class="draft-inline-button"
             data-action="continue-exercise"
             data-exercise-id="${exercise.exerciseId}"
+            aria-label="Добавить сет"
+            title="Добавить сет"
           >
-            + Сет
+            ${iconMarkup("draft-add-set")}
+            <span class="sr-only">Добавить сет</span>
           </button>
+          ${
+            exercise.sets.length
+              ? `
+                <button
+                  class="draft-inline-button draft-inline-button-muted"
+                  data-action="remove-last-draft-set"
+                  data-exercise-id="${exercise.exerciseId}"
+                  aria-label="Удалить последний сет"
+                  title="Удалить последний сет"
+                >
+                  ${iconMarkup("draft-remove-set")}
+                  <span class="sr-only">Удалить последний сет</span>
+                </button>
+              `
+              : ""
+          }
           ${
             canUseStandard
               ? `
@@ -3741,8 +3772,11 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
                   class="draft-inline-button draft-inline-button-secondary"
                   data-action="quick-standard-set"
                   data-exercise-id="${exercise.exerciseId}"
+                  aria-label="Добавить стандартный сет"
+                  title="Добавить стандартный сет"
                 >
-                  Стандарт
+                  ${iconMarkup("draft-add-standard")}
+                  <span class="sr-only">Добавить стандартный сет</span>
                 </button>
               `
               : ""
@@ -3751,8 +3785,11 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
             class="draft-inline-button draft-inline-button-danger"
             data-action="remove-draft-exercise"
             data-exercise-id="${exercise.exerciseId}"
+            aria-label="Удалить упражнение"
+            title="Удалить упражнение"
           >
-            Удалить упражнение
+            ${iconMarkup("draft-remove")}
+            <span class="sr-only">Удалить упражнение</span>
           </button>
         </div>
       </div>
@@ -3770,18 +3807,10 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
                         data-exercise-id="${exercise.exerciseId}"
                         data-set-index="${index}"
                       >
-                        <span class="set-row-index">Сет ${index + 1}</span>
-                        <span>${escapeHtml(
+                        <span class="set-row-index">${index + 1}.</span>
+                        <span class="set-row-value">${escapeHtml(
                           `${formatWeight(workoutSet.weight)} кг × ${workoutSet.reps}`
                         )}</span>
-                      </button>
-                      <button
-                        class="set-row-remove-button"
-                        data-action="remove-draft-set"
-                        data-exercise-id="${exercise.exerciseId}"
-                        data-set-index="${index}"
-                      >
-                        Удалить
                       </button>
                     </div>
                   `
@@ -3847,9 +3876,21 @@ function renderExercisePicker(exercises) {
             ? `
               <div class="exercise-picker-complete">
                 <div class="exercise-picker-complete-title">Круто, тренировка закончена</div>
-                <div class="exercise-picker-complete-text">
-                  Основная плитка уже закончилась, но ниже можно раскрыть остальные упражнения.
-                </div>
+                ${
+                  shouldShowMoreToggle
+                    ? `
+                      <div class="exercise-picker-more exercise-picker-more-complete">
+                        <button class="text-button exercise-picker-more-toggle" data-action="toggle-more-exercises">
+                          ${
+                            state.showAllExerciseOptions
+                              ? "Скрыть редкие упражнения"
+                              : `Ещё упражнения (${secondaryExercises.length})`
+                          }
+                        </button>
+                      </div>
+                    `
+                    : ""
+                }
               </div>
             `
           : exercises.length
@@ -3857,7 +3898,7 @@ function renderExercisePicker(exercises) {
             : `<p class="muted-note">В локальной базе не осталось свободных упражнений.</p>`
       }
       ${
-        shouldShowMoreToggle
+        shouldShowMoreToggle && !primaryPoolExhausted
           ? `
             <div class="exercise-picker-more">
               <button class="text-button exercise-picker-more-toggle" data-action="toggle-more-exercises">
@@ -4364,6 +4405,49 @@ function iconMarkup(name) {
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
         <path d="M7 7l10 10"></path>
         <path d="M17 7L7 17"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "draft-add-set") {
+    return `
+      <svg class="draft-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 7v10"></path>
+        <path d="M7 12h10"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "draft-add-standard") {
+    return `
+      <svg class="draft-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 7v10"></path>
+        <path d="M7 12h10"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "draft-remove-set") {
+    return `
+      <svg class="draft-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 6.5h6"></path>
+        <path d="M6.5 8h11"></path>
+        <path d="M8.2 8l.6 8.2a2 2 0 0 0 1.99 1.8h2.42a2 2 0 0 0 1.99-1.8L15.8 8"></path>
+        <path d="M10 10.5v4.5"></path>
+        <path d="M14 10.5v4.5"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "draft-remove") {
+    return `
+      <svg class="draft-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 6.5h6"></path>
+        <path d="M6.5 8h11"></path>
+        <path d="M8.2 8l.6 8.2a2 2 0 0 0 1.99 1.8h2.42a2 2 0 0 0 1.99-1.8L15.8 8"></path>
+        <path d="M10 10.5v4.5"></path>
+        <path d="M14 10.5v4.5"></path>
+        <path d="M10.5 6a1.5 1.5 0 0 1 3 0v.5h-3z"></path>
       </svg>
     `;
   }

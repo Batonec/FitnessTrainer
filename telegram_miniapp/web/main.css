@@ -1065,11 +1065,19 @@ button {
 
 .draft-exercise-head {
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.draft-exercise-title-row {
+  min-width: 0;
 }
 
 .draft-exercise-actions {
-  display: flex;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -1078,13 +1086,19 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
+  width: 40px;
+  min-width: 40px;
+  min-height: 40px;
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 0;
   background: rgba(69, 98, 208, 0.12);
   color: var(--success-ink);
-  font-size: 13px;
-  font-weight: 700;
+  transition: transform 0.14s ease, background-color 0.14s ease, opacity 0.14s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.draft-inline-button:active {
+  transform: scale(0.95);
 }
 
 .draft-inline-button-secondary {
@@ -1092,9 +1106,21 @@ button {
   color: var(--page-ink);
 }
 
+.draft-inline-button-muted {
+  background: rgba(17, 17, 17, 0.09);
+  color: rgba(17, 17, 17, 0.56);
+}
+
 .draft-inline-button-danger {
   background: rgba(176, 74, 74, 0.12);
   color: var(--danger-ink);
+}
+
+.draft-action-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex: 0 0 auto;
 }
 
 .set-row-editable {
@@ -1103,26 +1129,25 @@ button {
 
 .set-row-main {
   flex: 1;
-  display: grid;
-  justify-items: start;
-  gap: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   padding: 0;
+  min-width: 0;
 }
 
 .set-row-index {
   color: var(--page-muted);
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
-.set-row-remove-button {
-  align-self: center;
-  color: var(--danger-ink);
-  font-size: 13px;
-  font-weight: 700;
+.set-row-value {
+  min-width: 0;
+  line-height: 1.2;
 }
 
 .section-title {
@@ -1411,11 +1436,18 @@ button {
   line-height: 1.2;
 }
 
-.exercise-picker-complete-text {
-  margin-top: 4px;
-  color: var(--page-muted);
-  font-size: 12px;
-  line-height: 1.35;
+.exercise-picker-more {
+  margin-top: 10px;
+}
+
+.exercise-picker-more-complete {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.exercise-picker-more-toggle {
+  text-align: center;
 }
 
 .exercise-tile-grid {
