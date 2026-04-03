@@ -14,6 +14,7 @@ const PROGRESS_RANGES = [
   { key: "DAYS_30", label: "30D", days: 30 },
   { key: "ALL", label: "All", days: null },
 ];
+const ENABLE_NEXT_WORKOUT_PLAN = false;
 const TELEGRAM_INITDATA_WAIT_MS = 1800;
 const TELEGRAM_INITDATA_POLL_MS = 120;
 const WORKOUT_SWIPE_ACTIONS_WIDTH = 148;
@@ -61,6 +62,7 @@ let devVersion = null;
 let hasOpenNewHistoryEntry = false;
 let workoutSwipeGesture = null;
 let swipeClickGuard = null;
+let pendingScreenTransition = false;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
@@ -442,6 +444,7 @@ function setCurrentTab(tab) {
   captureScrollPosition(state.currentTab);
   state.openWorkoutSwipeId = null;
   state.currentTab = tab;
+  pendingScreenTransition = true;
   writeTextStorage(STORAGE_KEYS.tab, tab);
   ensureNewWorkoutFlow();
   queueScrollRestore(tab);
@@ -488,6 +491,7 @@ function openNewWorkout() {
   captureScrollPosition(state.currentTab);
   state.openWorkoutSwipeId = null;
   state.currentTab = "new";
+  pendingScreenTransition = true;
   writeTextStorage(STORAGE_KEYS.tab, "new");
   ensureNewWorkoutFlow();
   queueScrollRestore("new", 0);
@@ -684,6 +688,9 @@ function hasAppliedWorkoutPlan() {
 }
 
 function getNextWorkoutPlanSuggestion(workouts = getAllWorkouts()) {
+  if (!ENABLE_NEXT_WORKOUT_PLAN) {
+    return null;
+  }
   if (state.editingWorkoutId) {
     return null;
   }
@@ -1981,6 +1988,7 @@ function restoreTabFromHistory(tab, options = {}) {
   }
 
   state.currentTab = nextTab;
+  pendingScreenTransition = true;
   writeTextStorage(STORAGE_KEYS.tab, nextTab);
   ensureNewWorkoutFlow();
   queueScrollRestore(nextTab, options.top ?? null);
@@ -2108,6 +2116,7 @@ function render() {
 
   const topbar = renderTopbar();
   const screen = renderCurrentScreen();
+  const screenStageClass = pendingScreenTransition ? "screen-stage screen-stage-enter" : "screen-stage";
   const nav = renderBottomNav();
   const fab = renderFloatingActionButton();
   const modal = state.isAddingSet ? renderSetModal() : "";
@@ -2117,7 +2126,9 @@ function render() {
     <div class="layout">
       ${topbar}
       <main class="screen">
-        ${screen}
+        <div class="${screenStageClass}">
+          ${screen}
+        </div>
       </main>
       ${fab}
       ${toast}
@@ -2125,6 +2136,7 @@ function render() {
       ${modal}
     </div>
   `;
+  pendingScreenTransition = false;
   updateTelegramBackButton();
   flushPendingScrollRestore();
 }
@@ -2138,17 +2150,7 @@ function renderTopbar() {
 
   const buildPills = buildTopbarPills();
   let actionMarkup = "";
-  const topbarRowClass =
-    state.currentTab === "new"
-      ? "topbar-row topbar-row-compact topbar-row-centered"
-      : "topbar-row topbar-row-compact";
-  if (state.currentTab === "progress") {
-    actionMarkup = `
-      <button class="secondary-button topbar-utility-button" data-action="refresh-progress">
-        Обновить
-      </button>
-    `;
-  }
+  const topbarRowClass = "topbar-row topbar-row-compact topbar-row-centered";
 
   if (state.currentTab === "new") {
     actionMarkup = `
@@ -2196,7 +2198,7 @@ function renderCurrentScreen() {
 
 function renderTrainingsScreen() {
   const workouts = getAllWorkouts();
-  const nextWorkoutPlan = buildNextWorkoutPlanSuggestion(workouts);
+  const nextWorkoutPlan = getNextWorkoutPlanSuggestion(workouts);
   if (!workouts.length) {
     return renderEmptyState("Пока нет тренировок");
   }

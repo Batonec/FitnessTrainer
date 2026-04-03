@@ -474,44 +474,25 @@ class MiniAppE2ETest(unittest.TestCase):
         self.reveal_workout_actions(target_card, vertical_shift=24)
         expect(target_card.locator('[data-action="edit-workout"]')).to_be_visible()
 
-    def test_trainings_screen_shows_next_workout_plan_based_on_latest_workout(self) -> None:
+    def test_trainings_screen_hides_next_workout_plan_when_feature_disabled(self) -> None:
         self.seed_next_workout_plan_source()
 
         self.open_app()
 
-        plan_card = self.page.locator(".next-plan-card")
-        expect(plan_card).to_contain_text("План следующей тренировки")
-        expect(plan_card).to_contain_text("Основано на тренировке от 28 марта 2026")
-        expect(plan_card).to_contain_text("+1 повт/сет")
-        expect(plan_card).to_contain_text("Жим ногами")
-        expect(plan_card).to_contain_text("80кг ×16×3")
-        expect(plan_card).to_contain_text("Тяга верт.")
-        expect(plan_card).to_contain_text("60кг ×13")
-        expect(plan_card).to_contain_text("65кг ×11")
-        expect(plan_card).not_to_contain_text("Старый план")
+        expect(self.page.locator(".next-plan-card")).to_have_count(0)
+        expect(self.page.locator(".workout-card").filter(has_text="Жим ногами")).to_be_visible()
+        expect(self.page.locator(".workout-card").filter(has_text="Тяга верт.")).to_be_visible()
 
-    def test_new_workout_can_start_from_next_workout_plan(self) -> None:
+    def test_new_workout_does_not_prefill_from_next_workout_plan_when_feature_disabled(self) -> None:
         self.seed_next_workout_plan_source()
         self.open_app()
 
-        self.open_new_workout_with_plan()
-
-        plan_card = self.page.locator(".plan-start-banner")
-        expect(plan_card).to_contain_text("План следующей тренировки")
-        expect(plan_card).to_contain_text("Основано на тренировке от 28 марта 2026")
-        expect(plan_card).to_contain_text("Жим ногами")
-        expect(plan_card).to_contain_text("80кг ×16×3")
-
-        self.page.locator('[data-action="apply-workout-plan"]').click()
-
-        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_contain_text("80 кг × 16")
-        expect(self.page.locator(".exercise-card").filter(has_text="Тяга верт.")).to_contain_text("65 кг × 11")
-        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
-
-        self.leave_new_workout()
         self.open_new_workout()
-        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
-        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_be_visible()
+
+        expect(self.page.locator(".plan-start-banner")).to_have_count(0)
+        expect(self.page.locator(".exercise-card")).to_have_count(0)
+        expect(self.page.locator(".exercise-picker")).to_be_visible()
+        self.assertGreater(self.page.locator('[data-action="select-exercise"]').count(), 0)
 
     def test_exercise_picker_prioritizes_main_history_block_and_hides_rest_under_more(self) -> None:
         self.seed_popular_exercise_picker_history()
