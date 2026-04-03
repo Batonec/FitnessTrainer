@@ -865,7 +865,7 @@ class MiniAppE2ETest(unittest.TestCase):
         save_fab = self.page.locator('[data-action="finish-workout"]').first
         expect(save_fab).not_to_have_class(re.compile(r".*is-icon-morph.*"))
 
-    def test_workout_progress_ring_first_step_is_visually_legible(self) -> None:
+    def test_workout_progress_ring_first_step_uses_true_linear_ratio(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
         self.open_new_workout()
@@ -883,8 +883,42 @@ class MiniAppE2ETest(unittest.TestCase):
         )
 
         self.assertAlmostEqual(logical_ratio, 1 / 6, delta=0.02)
-        self.assertGreater(visible_ratio, logical_ratio + 0.05)
-        self.assertLess(visible_ratio, 0.35)
+        self.assertAlmostEqual(visible_ratio, logical_ratio, delta=0.02)
+
+    def test_workout_progress_ring_recedes_by_one_step_when_exercise_is_removed(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.wait_for_function(
+            "() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > 0.15"
+        )
+        self.select_exercise_by_name("Тяга верт.")
+        self.add_default_set()
+        self.page.wait_for_function(
+            "() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > 0.3"
+        )
+
+        second_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
+        self.assertAlmostEqual(second_ratio, 2 / 6, delta=0.02)
+
+        self.page.locator(".exercise-card").filter(has_text="Тяга верт.").locator(
+            '[data-action="remove-draft-exercise"]'
+        ).click()
+        self.page.wait_for_function(
+            "() => Math.abs(window.__trainerMiniAppTestApi.getTargetFabProgressRatio() - (1 / 6)) < 0.02"
+        )
+
+        first_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
+        self.assertAlmostEqual(first_ratio, 1 / 6, delta=0.02)
+
+        self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
+            '[data-action="remove-draft-exercise"]'
+        ).click()
+        expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
+        expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
     def test_new_workout_supports_alternating_superset_sets(self) -> None:
         self.open_app()

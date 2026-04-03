@@ -80,6 +80,8 @@ let fabProgressAnimationFrameId = null;
 let fabProgressAnimationTimeoutId = null;
 let fabProgressPulseTimeoutId = null;
 let fabProgressGradientIdCounter = 0;
+let nextFabProgressAnimationDelayMs = 0;
+let pendingFabProgressPulseOnlyDelayMs = 0;
 let newWorkoutFabPresence = "hidden";
 let newWorkoutFabAnimationTimeoutId = null;
 let pendingNewWorkoutFabEnterAnimation = false;
@@ -2182,7 +2184,8 @@ function flushPendingFabProgressAnimation() {
     const durationMs = 320;
     const settleDurationMs = 0;
     const totalDurationMs = durationMs + settleDurationMs;
-    const startDelayMs = 0;
+    const startDelayMs = nextFabProgressAnimationDelayMs;
+    nextFabProgressAnimationDelayMs = 0;
     const easeOutCubic = (value) => 1 - ((1 - value) ** 3);
     const easeInOutSine = (value) => -(Math.cos(Math.PI * value) - 1) / 2;
     const overshootRatio = targetRatio;
@@ -2228,6 +2231,34 @@ function flushPendingFabProgressAnimation() {
   });
 }
 
+function flushPendingFabProgressPulseOnly() {
+  if (pendingFabProgressPulseOnlyDelayMs <= 0) {
+    return;
+  }
+
+  const delayMs = pendingFabProgressPulseOnlyDelayMs;
+  pendingFabProgressPulseOnlyDelayMs = 0;
+
+  const fab = root.querySelector(".floating-action-button.has-progress");
+  if (!fab) {
+    return;
+  }
+
+  if (fabProgressPulseTimeoutId) {
+    window.clearTimeout(fabProgressPulseTimeoutId);
+    fabProgressPulseTimeoutId = null;
+  }
+
+  fab.classList.remove("is-progress-animating");
+  fabProgressPulseTimeoutId = window.setTimeout(() => {
+    fab.classList.add("is-progress-animating");
+    fabProgressPulseTimeoutId = window.setTimeout(() => {
+      fab.classList.remove("is-progress-animating");
+      fabProgressPulseTimeoutId = null;
+    }, 700);
+  }, delayMs);
+}
+
 function syncNewWorkoutFabPresenceState() {
   const desiredVisible = state.currentTab === "new" && hasWorkoutDraftSets();
 
@@ -2246,6 +2277,8 @@ function syncNewWorkoutFabPresenceState() {
     pendingNewWorkoutFabExitAnimation = false;
     pendingNewWorkoutDangerFabEnterAnimation = false;
     skipNextNewWorkoutSaveFabEnterAnimation = false;
+    nextFabProgressAnimationDelayMs = 0;
+    pendingFabProgressPulseOnlyDelayMs = 0;
     return;
   }
 
@@ -2260,6 +2293,9 @@ function syncNewWorkoutFabPresenceState() {
       pendingNewWorkoutFabEnterAnimation = !skipNextNewWorkoutSaveFabEnterAnimation;
       pendingNewWorkoutFabExitAnimation = false;
       pendingNewWorkoutDangerFabEnterAnimation = false;
+      nextFabProgressAnimationDelayMs = pendingNewWorkoutFabEnterAnimation
+        ? NEW_WORKOUT_FAB_ANIMATION_MS
+        : 0;
       skipNextNewWorkoutSaveFabEnterAnimation = false;
       if (newWorkoutDangerFabTimeoutId) {
         window.clearTimeout(newWorkoutDangerFabTimeoutId);
@@ -2756,6 +2792,7 @@ function render() {
   flushPendingDraftExerciseScroll();
   flushNewWorkoutFabPresenceAnimation();
   flushPendingFabProgressAnimation();
+  flushPendingFabProgressPulseOnly();
 }
 
 function renderTopbar() {
@@ -3970,14 +4007,7 @@ function renderFabProgressRing(initialRatio, progressColor, progressGlow) {
 }
 
 function getVisibleFabProgressRatio(ratio) {
-  const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
-  if (safeRatio <= 0) {
-    return 0;
-  }
-
-  // Keep the first completed exercise visually legible on a small circular ring,
-  // while preserving the underlying logical progress ratio.
-  return Math.min(1, 0.12 + (safeRatio * 0.88));
+  return Math.max(0, Math.min(1, Number(ratio) || 0));
 }
 
 function renderMorphingFabIcon(fromIcon, toIcon) {
@@ -3996,6 +4026,20 @@ function renderFloatingActionButton() {
     displayedFabProgressRatio = 0;
     targetFabProgressRatio = 0;
     pendingFabProgressAnimation = null;
+    nextFabProgressAnimationDelayMs = 0;
+    pendingFabProgressPulseOnlyDelayMs = 0;
+  } else if (targetFabProgressRatio <= 0.001 && displayedFabProgressRatio <= 0.001) {
+    if (nextFabProgressAnimationDelayMs > 0) {
+      displayedFabProgressRatio = draftProgress.ratio;
+      targetFabProgressRatio = draftProgress.ratio;
+      pendingFabProgressAnimation = null;
+      pendingFabProgressPulseOnlyDelayMs = nextFabProgressAnimationDelayMs;
+      nextFabProgressAnimationDelayMs = 0;
+    } else {
+      displayedFabProgressRatio = draftProgress.ratio;
+      targetFabProgressRatio = draftProgress.ratio;
+      pendingFabProgressAnimation = null;
+    }
   } else if (Math.abs(draftProgress.ratio - targetFabProgressRatio) > 0.001) {
     pendingFabProgressAnimation = draftProgress.ratio;
     targetFabProgressRatio = draftProgress.ratio;
