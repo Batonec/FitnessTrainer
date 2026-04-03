@@ -18,6 +18,8 @@ const PROGRESS_RANGES = [
 const ENABLE_NEXT_WORKOUT_PLAN = false;
 const TELEGRAM_INITDATA_WAIT_MS = 1800;
 const TELEGRAM_INITDATA_POLL_MS = 120;
+const NEW_WORKOUT_FAB_ANIMATION_MS = 220;
+const NEW_WORKOUT_DANGER_FAB_DELAY_MS = 140;
 const WORKOUT_SWIPE_ACTIONS_WIDTH = 148;
 const WORKOUT_SWIPE_GESTURE_THRESHOLD = 8;
 const WORKOUT_SWIPE_HORIZONTAL_RATIO = 0.62;
@@ -71,6 +73,20 @@ let workoutSwipeGesture = null;
 let swipeClickGuard = null;
 let pendingScreenTransition = false;
 let pendingDraftExerciseScrollId = null;
+let displayedFabProgressRatio = 0;
+let targetFabProgressRatio = 0;
+let pendingFabProgressAnimation = null;
+let fabProgressAnimationFrameId = null;
+let fabProgressAnimationTimeoutId = null;
+let fabProgressPulseTimeoutId = null;
+let fabProgressGradientIdCounter = 0;
+let newWorkoutFabPresence = "hidden";
+let newWorkoutFabAnimationTimeoutId = null;
+let pendingNewWorkoutFabEnterAnimation = false;
+let pendingNewWorkoutFabExitAnimation = false;
+let isNewWorkoutDangerFabVisible = false;
+let newWorkoutDangerFabTimeoutId = null;
+let pendingNewWorkoutDangerFabEnterAnimation = false;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
@@ -729,6 +745,12 @@ function hasWorkoutDraft() {
   return state.workoutExercises.length > 0 || state.selectedExerciseId !== null;
 }
 
+function hasWorkoutDraftSets() {
+  return state.workoutExercises.some(
+    (exercise) => Array.isArray(exercise.sets) && exercise.sets.length > 0
+  );
+}
+
 function hasAppliedWorkoutPlan() {
   return Boolean(state.appliedWorkoutPlan?.strategy);
 }
@@ -894,6 +916,36 @@ function getAvailableExercises() {
   return state.exercises.filter((exercise) => !addedIds.has(exercise.id));
 }
 
+function getWorkoutDraftProgress() {
+  if (!hasWorkoutDraftSets()) {
+    displayedFabProgressRatio = 0;
+    targetFabProgressRatio = 0;
+    pendingFabProgressAnimation = null;
+    return {
+      isVisible: false,
+      ratio: 0,
+      color: "hsl(10 78% 74%)",
+      glow: "hsla(10 78% 60% / 0.2)",
+    };
+  }
+
+  const catalog = Array.isArray(state.exercises) && state.exercises.length
+    ? state.exercises
+    : getAvailableExercises();
+  const { primaryPoolTotal, completedPrimaryCount } = getExercisePickerGroups(catalog, getAllWorkouts());
+  const ratio = primaryPoolTotal > 0
+    ? Math.max(0, Math.min(1, completedPrimaryCount / primaryPoolTotal))
+    : 0;
+  const hue = Math.round(10 + ratio * 122);
+
+  return {
+    isVisible: primaryPoolTotal > 0,
+    ratio,
+    color: `hsl(${hue} 68% 66%)`,
+    glow: `hsla(${hue} 80% 56% / 0.22)`,
+  };
+}
+
 function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
   const available = Array.isArray(exercises) ? exercises : [];
   if (!available.length) {
@@ -901,6 +953,8 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
       primary: [],
       secondary: [],
       primaryPoolExhausted: false,
+      primaryPoolTotal: 0,
+      completedPrimaryCount: 0,
     };
   }
 
@@ -977,6 +1031,21 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     })
     .map((item) => item.exercise);
 
+  const completedExerciseIds = new Set(
+    Array.isArray(state.workoutExercises)
+      ? state.workoutExercises
+        .filter((exercise) => Array.isArray(exercise.sets) && exercise.sets.length > 0)
+        .map((exercise) => exercise.exerciseId)
+        .filter((exerciseId) => Number.isFinite(Number(exerciseId)))
+        .map((exerciseId) => Number(exerciseId))
+      : []
+  );
+
+  const primaryPoolTotal = primaryIds.size;
+  const completedPrimaryCount = Array.from(primaryIds).filter((exerciseId) =>
+    completedExerciseIds.has(exerciseId)
+  ).length;
+
   const secondary = rankedAvailable
     .filter((item) => !primaryIds.has(item.exercise.id))
     .sort((left, right) => {
@@ -994,6 +1063,8 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     primary,
     secondary,
     primaryPoolExhausted: primaryPool.length > 0 && primary.length === 0 && secondary.length > 0,
+    primaryPoolTotal,
+    completedPrimaryCount,
   };
 }
 
@@ -1320,11 +1391,27 @@ function startAddingSetForExercise(exerciseId) {
 }
 
 function cancelAddingSet() {
-  if (state.activeSetEditor?.exerciseId) {
-    pendingDraftExerciseScrollId = Number(state.activeSetEditor.exerciseId);
+  const exerciseId = Number(state.activeSetEditor?.exerciseId);
+  const draftExercise = state.workoutExercises.find(
+    (exercise) => exercise.exerciseId === exerciseId
+  ) || null;
+  const shouldRemoveEmptyExercise =
+    Number.isFinite(exerciseId) &&
+    draftExercise &&
+    draftExercise.sets.length === 0 &&
+    !Number.isInteger(state.activeSetEditor?.setIndex);
+
+  if (shouldRemoveEmptyExercise) {
+    removeDraftExercise(exerciseId);
+    return;
+  }
+
+  if (Number.isFinite(exerciseId)) {
+    pendingDraftExerciseScrollId = exerciseId;
   }
   state.isAddingSet = false;
   state.activeSetEditor = null;
+  persistDraft();
   render();
 }
 
@@ -1645,7 +1732,7 @@ function resetWorkoutDraftWithConfirmation() {
     }
     showFlash("Редактирование отменено");
   } else {
-    showFlash("Черновик тренировки очищен");
+    showFlash("Черновик тренировки очищен", { renderNow: false });
     render();
   }
 }
@@ -2041,6 +2128,209 @@ function flushPendingDraftExerciseScroll() {
       behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth",
     });
   });
+}
+
+function flushPendingFabProgressAnimation() {
+  if (pendingFabProgressAnimation == null) {
+    return;
+  }
+
+  const targetRatio = pendingFabProgressAnimation;
+  pendingFabProgressAnimation = null;
+
+  window.requestAnimationFrame(() => {
+    const fab = root.querySelector(".floating-action-button.has-progress");
+    if (!fab) {
+      return;
+    }
+    const indicator = fab.querySelector(".fab-progress-ring-indicator");
+    if (!indicator) {
+      return;
+    }
+
+    if (fabProgressAnimationFrameId) {
+      window.cancelAnimationFrame(fabProgressAnimationFrameId);
+      fabProgressAnimationFrameId = null;
+    }
+    if (fabProgressAnimationTimeoutId) {
+      window.clearTimeout(fabProgressAnimationTimeoutId);
+      fabProgressAnimationTimeoutId = null;
+    }
+    if (fabProgressPulseTimeoutId) {
+      window.clearTimeout(fabProgressPulseTimeoutId);
+      fabProgressPulseTimeoutId = null;
+    }
+    fab.classList.remove("is-progress-animating");
+
+    const startRatio = displayedFabProgressRatio;
+
+    if (Math.abs(targetRatio - startRatio) < 0.001) {
+      displayedFabProgressRatio = targetRatio;
+      fab.dataset.fabProgressRatio = String(targetRatio);
+      indicator.style.strokeDasharray = `${targetRatio * 100} 100`;
+      return;
+    }
+
+    const isForward = targetRatio > startRatio;
+    const durationMs = 320;
+    const settleDurationMs = 0;
+    const totalDurationMs = durationMs + settleDurationMs;
+    const startDelayMs = 0;
+    const easeOutCubic = (value) => 1 - ((1 - value) ** 3);
+    const easeInOutSine = (value) => -(Math.cos(Math.PI * value) - 1) / 2;
+    const overshootRatio = targetRatio;
+    let startTime = null;
+
+    const step = (now) => {
+      if (startTime == null) {
+        startTime = now;
+      }
+
+      const elapsed = now - startTime;
+      let nextRatio = targetRatio;
+
+      const progress = Math.min(1, elapsed / durationMs);
+      const easedProgress = isForward ? easeInOutSine(progress) : easeOutCubic(progress);
+      nextRatio = startRatio + (((isForward ? overshootRatio : targetRatio) - startRatio) * easedProgress);
+
+      displayedFabProgressRatio = nextRatio;
+      fab.dataset.fabProgressRatio = String(nextRatio);
+      indicator.style.strokeDasharray = `${nextRatio * 100} 100`;
+
+      if (elapsed < totalDurationMs) {
+        fabProgressAnimationFrameId = window.requestAnimationFrame(step);
+      } else {
+        displayedFabProgressRatio = targetRatio;
+        fab.dataset.fabProgressRatio = String(targetRatio);
+        indicator.style.strokeDasharray = `${targetRatio * 100} 100`;
+        fabProgressAnimationFrameId = null;
+      }
+    };
+
+    fabProgressAnimationTimeoutId = window.setTimeout(() => {
+      fabProgressAnimationTimeoutId = null;
+      if (isForward) {
+        fab.classList.add("is-progress-animating");
+        fabProgressPulseTimeoutId = window.setTimeout(() => {
+          fab.classList.remove("is-progress-animating");
+          fabProgressPulseTimeoutId = null;
+        }, totalDurationMs + 80);
+      }
+      fabProgressAnimationFrameId = window.requestAnimationFrame(step);
+    }, startDelayMs);
+  });
+}
+
+function syncNewWorkoutFabPresenceState() {
+  const desiredVisible = state.currentTab === "new" && hasWorkoutDraftSets();
+
+  if (state.currentTab !== "new") {
+    if (newWorkoutFabAnimationTimeoutId) {
+      window.clearTimeout(newWorkoutFabAnimationTimeoutId);
+      newWorkoutFabAnimationTimeoutId = null;
+    }
+    if (newWorkoutDangerFabTimeoutId) {
+      window.clearTimeout(newWorkoutDangerFabTimeoutId);
+      newWorkoutDangerFabTimeoutId = null;
+    }
+    newWorkoutFabPresence = "hidden";
+    isNewWorkoutDangerFabVisible = false;
+    pendingNewWorkoutFabEnterAnimation = false;
+    pendingNewWorkoutFabExitAnimation = false;
+    pendingNewWorkoutDangerFabEnterAnimation = false;
+    return;
+  }
+
+  if (desiredVisible) {
+    if (newWorkoutFabAnimationTimeoutId) {
+      window.clearTimeout(newWorkoutFabAnimationTimeoutId);
+      newWorkoutFabAnimationTimeoutId = null;
+    }
+    if (newWorkoutFabPresence !== "visible") {
+      newWorkoutFabPresence = "visible";
+      isNewWorkoutDangerFabVisible = false;
+      pendingNewWorkoutFabEnterAnimation = true;
+      pendingNewWorkoutFabExitAnimation = false;
+      pendingNewWorkoutDangerFabEnterAnimation = false;
+      if (newWorkoutDangerFabTimeoutId) {
+        window.clearTimeout(newWorkoutDangerFabTimeoutId);
+      }
+      newWorkoutDangerFabTimeoutId = window.setTimeout(() => {
+        newWorkoutDangerFabTimeoutId = null;
+        if (state.currentTab === "new" && newWorkoutFabPresence === "visible" && hasWorkoutDraftSets()) {
+          isNewWorkoutDangerFabVisible = true;
+          pendingNewWorkoutDangerFabEnterAnimation = true;
+          render();
+        }
+      }, NEW_WORKOUT_DANGER_FAB_DELAY_MS);
+    }
+    return;
+  }
+
+  if (newWorkoutFabPresence === "visible") {
+    newWorkoutFabPresence = "exiting";
+    pendingNewWorkoutFabExitAnimation = true;
+    pendingNewWorkoutFabEnterAnimation = false;
+    if (newWorkoutFabAnimationTimeoutId) {
+      window.clearTimeout(newWorkoutFabAnimationTimeoutId);
+    }
+    newWorkoutFabAnimationTimeoutId = window.setTimeout(() => {
+      newWorkoutFabAnimationTimeoutId = null;
+      if (state.currentTab === "new" && !hasWorkoutDraftSets()) {
+        newWorkoutFabPresence = "hidden";
+        isNewWorkoutDangerFabVisible = false;
+        render();
+      }
+    }, NEW_WORKOUT_FAB_ANIMATION_MS);
+  }
+}
+
+function flushNewWorkoutFabPresenceAnimation() {
+  if (
+    !pendingNewWorkoutFabEnterAnimation &&
+    !pendingNewWorkoutFabExitAnimation &&
+    !pendingNewWorkoutDangerFabEnterAnimation
+  ) {
+    return;
+  }
+
+  const group = root.querySelector(".new-workout-fab-group");
+  if (!group) {
+    pendingNewWorkoutFabEnterAnimation = false;
+    pendingNewWorkoutFabExitAnimation = false;
+    return;
+  }
+
+  if (pendingNewWorkoutFabEnterAnimation) {
+    pendingNewWorkoutFabEnterAnimation = false;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        group.classList.add("is-enter-active");
+      });
+    });
+  }
+
+  if (pendingNewWorkoutFabExitAnimation) {
+    pendingNewWorkoutFabExitAnimation = false;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        group.classList.add("is-exit-active");
+      });
+    });
+  }
+
+  if (pendingNewWorkoutDangerFabEnterAnimation) {
+    pendingNewWorkoutDangerFabEnterAnimation = false;
+    const dangerButton = group.querySelector(".floating-action-button-secondary");
+    if (!dangerButton) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        dangerButton.classList.add("is-delayed-enter-active");
+      });
+    });
+  }
 }
 
 function syncBrowserHistory(mode = "replace") {
@@ -2440,6 +2730,8 @@ function render() {
   updateTelegramBackButton();
   flushPendingScrollRestore();
   flushPendingDraftExerciseScroll();
+  flushNewWorkoutFabPresenceAnimation();
+  flushPendingFabProgressAnimation();
 }
 
 function renderTopbar() {
@@ -3621,22 +3913,83 @@ function renderBottomNav() {
   `;
 }
 
+function renderFabProgressRing(initialRatio, progressColor, progressGlow) {
+  const gradientId = `fab-progress-gradient-${fabProgressGradientIdCounter += 1}`;
+  const safeRatio = Math.max(0, Math.min(1, Number(initialRatio) || 0));
+  const dashLength = safeRatio * 100;
+
+  return `
+    <span class="fab-progress-ring" aria-hidden="true" style="--fab-progress-glow: ${progressGlow};">
+      <svg class="fab-progress-ring-svg" viewBox="0 0 74 74" focusable="false">
+        <defs>
+          <linearGradient id="${gradientId}" x1="8%" y1="92%" x2="92%" y2="8%">
+            <stop offset="0%" stop-color="#ff9a92"></stop>
+            <stop offset="28%" stop-color="#ffb07f"></stop>
+            <stop offset="56%" stop-color="#ffd66f"></stop>
+            <stop offset="80%" stop-color="#d9e77a"></stop>
+            <stop offset="100%" stop-color="${progressColor}"></stop>
+          </linearGradient>
+        </defs>
+        <circle class="fab-progress-ring-track" cx="37" cy="37" r="33" pathLength="100"></circle>
+        <circle
+          class="fab-progress-ring-indicator"
+          cx="37"
+          cy="37"
+          r="33"
+          pathLength="100"
+          stroke="url(#${gradientId})"
+          style="stroke-dasharray: ${dashLength} 100;"
+        ></circle>
+      </svg>
+    </span>
+  `;
+}
+
 function renderFloatingActionButton() {
+  syncNewWorkoutFabPresenceState();
+  const draftProgress = getWorkoutDraftProgress();
+  if (!draftProgress.isVisible) {
+    displayedFabProgressRatio = 0;
+    targetFabProgressRatio = 0;
+    pendingFabProgressAnimation = null;
+  } else if (Math.abs(draftProgress.ratio - targetFabProgressRatio) > 0.001) {
+    pendingFabProgressAnimation = draftProgress.ratio;
+    targetFabProgressRatio = draftProgress.ratio;
+  }
+  const draftProgressClass = draftProgress.isVisible ? " has-progress" : "";
+  const draftProgressData = draftProgress.isVisible
+    ? ` data-fab-progress-ratio="${displayedFabProgressRatio}"`
+    : "";
+  const draftProgressRing = draftProgress.isVisible
+    ? renderFabProgressRing(displayedFabProgressRatio, draftProgress.color, draftProgress.glow)
+    : "";
+
   if (state.currentTab === "trainings") {
     return `
-      <button class="floating-action-button" data-action="open-new-workout" aria-label="Новая тренировка">
+      <button class="floating-action-button${draftProgressClass}" data-action="open-new-workout" aria-label="Новая тренировка"${draftProgressData}>
+        ${draftProgressRing}
         ${iconMarkup("new")}
       </button>
     `;
   }
 
   if (state.currentTab === "new") {
+    if (newWorkoutFabPresence === "hidden") {
+      return "";
+    }
+
+    const fabGroupClass = [
+      "new-workout-fab-group",
+      pendingNewWorkoutFabEnterAnimation ? "is-enter" : "",
+      newWorkoutFabPresence === "exiting" ? "is-exit" : "",
+    ].filter(Boolean).join(" ");
+
     const actions = [];
 
-    if (hasWorkoutDraft()) {
+    if (newWorkoutFabPresence === "exiting" || isNewWorkoutDangerFabVisible) {
       actions.push(`
         <button
-          class="floating-action-button floating-action-button-secondary floating-action-button-danger"
+          class="floating-action-button floating-action-button-secondary floating-action-button-danger ${pendingNewWorkoutDangerFabEnterAnimation ? "is-delayed-enter" : ""}"
           data-action="reset-workout-draft"
           aria-label="${state.editingWorkoutId ? "Отменить редактирование" : "Сбросить черновик"}"
         >
@@ -3645,20 +3998,22 @@ function renderFloatingActionButton() {
       `);
     }
 
-    if (state.workoutExercises.length > 0) {
+    if (newWorkoutFabPresence !== "hidden") {
       actions.push(`
         <button
-          class="floating-action-button floating-action-button-save"
+          class="floating-action-button floating-action-button-save${draftProgressClass}"
           data-action="finish-workout"
           aria-label="${state.isSavingWorkout ? "Сохраняю тренировку" : "Сохранить тренировку"}"
           ${state.isSavingWorkout ? "disabled" : ""}
+          ${draftProgressData}
         >
+          ${draftProgressRing}
           ${iconMarkup("save")}
         </button>
       `);
     }
 
-    return actions.join("");
+    return `<div class="${fabGroupClass}">${actions.join("")}</div>`;
   }
 
   return "";
@@ -3706,14 +4061,16 @@ function buildTopbarPills() {
   return pills.join("");
 }
 
-function showFlash(message) {
+function showFlash(message, { renderNow = true } = {}) {
   state.flashMessage = message;
   clearTimeout(flashTimeoutId);
   flashTimeoutId = window.setTimeout(() => {
     state.flashMessage = "";
     render();
   }, 2200);
-  render();
+  if (renderNow) {
+    render();
+  }
 }
 
 function formatLongDate(value) {
