@@ -99,7 +99,7 @@ class MiniAppE2ETest(unittest.TestCase):
 
     def open_app(self) -> None:
         self.page.goto(self.app.base_url, wait_until="networkidle")
-        expect(self.page.locator("header .sr-only.topbar-title")).to_have_text("Trainings")
+        expect(self.page.locator('.bottom-nav [data-action="switch-tab"][data-tab="trainings"]')).to_have_count(1)
 
     def telegram_seed_client(self) -> JsonHttpClient:
         client = JsonHttpClient(self.app.base_url)
@@ -514,6 +514,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(picker).not_to_contain_text("Жим в тренажере")
         self.page.locator('[data-action="toggle-more-exercises"]').click()
         expect(picker).to_contain_text("Скрыть редкие упражнения")
+        expect(self.page.locator(".exercise-picker-group-secondary .exercise-picker-group-title")).to_have_text("Все упражнения")
         expect(picker).to_contain_text("Жим гор.")
         expect(picker).to_contain_text("Жим в тренажере")
 
@@ -536,6 +537,21 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Бабочка")).to_have_count(1)
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
+
+    def test_set_modal_closes_on_overlay_tap(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.open_app()
+        self.open_new_workout()
+
+        picker = self.page.locator(".exercise-picker")
+        picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        expect(self.page.locator(".modal-card")).to_be_visible()
+
+        self.page.locator(".modal-overlay").click(position={"x": 16, "y": 16})
+
+        expect(self.page.locator(".modal-card")).to_have_count(0)
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_have_count(0)
+        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(1)
 
     def test_exercise_picker_hides_primary_exercise_after_first_set_is_added(self) -> None:
         self.seed_popular_exercise_picker_history()
@@ -562,14 +578,24 @@ class MiniAppE2ETest(unittest.TestCase):
         self.add_default_set()
 
         card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
-        expect(card.locator('[data-action="continue-exercise"]')).to_have_attribute("title", "Добавить сет")
-        expect(card.locator('[data-action="continue-exercise"] svg')).to_have_count(1)
-        expect(card.locator('[data-action="remove-last-draft-set"]')).to_have_attribute("title", "Удалить последний сет")
-        expect(card.locator('[data-action="remove-last-draft-set"] svg')).to_have_count(1)
-        expect(card.locator('[data-action="quick-standard-set"]')).to_have_attribute("title", "Добавить стандартный сет")
-        expect(card.locator('[data-action="quick-standard-set"] svg')).to_have_count(1)
-        expect(card.locator('[data-action="remove-draft-exercise"]')).to_have_attribute("title", "Удалить упражнение")
-        expect(card.locator('[data-action="remove-draft-exercise"] svg')).to_have_count(1)
+        expect(card.locator(".draft-exercise-icon-slot svg")).to_have_count(1)
+        expect(card.locator(".draft-primary-add-button")).to_have_attribute(
+            "data-longpress-action", "continue-exercise"
+        )
+        expect(card.locator(".draft-primary-add-button")).to_have_attribute(
+            "data-action", "quick-standard-set"
+        )
+        expect(card.locator(".draft-primary-add-button")).to_have_attribute(
+            "title", "Тап: стандартный сет · удержание: свой сет"
+        )
+        expect(card.locator(".draft-primary-add-button svg")).to_have_count(1)
+        expect(card.locator('[data-action="remove-last-draft-set"]')).to_have_count(0)
+        expect(card.locator('[data-action="remove-draft-exercise"]')).to_have_count(0)
+        self.page.evaluate(
+            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(8)"
+        )
+        expect(self.page.locator('.draft-exercise-swipe-actions [data-action="remove-last-draft-set"]')).to_have_attribute("title", "Удалить последний сет")
+        expect(self.page.locator('.draft-exercise-swipe-actions [data-action="remove-draft-exercise"]')).to_have_attribute("title", "Удалить упражнение")
         expect(card.locator(".set-row-remove-button")).to_have_count(0)
 
     def test_draft_exercise_card_can_remove_last_set_from_header_action(self) -> None:
@@ -579,14 +605,16 @@ class MiniAppE2ETest(unittest.TestCase):
         self.select_exercise_by_name("Жим ногами")
         self.add_default_set()
         self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
-            '[data-action="continue-exercise"]'
+            ".draft-primary-add-button"
         ).click()
-        self.page.locator('[data-action="set-apply"]').click()
 
         card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
         expect(card.locator(".set-row")).to_have_count(2)
 
-        card.locator('[data-action="remove-last-draft-set"]').click()
+        self.page.evaluate(
+            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(8)"
+        )
+        self.page.locator('.draft-exercise-swipe-actions [data-action="remove-last-draft-set"]').click()
         expect(card.locator(".set-row")).to_have_count(1)
 
     def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
@@ -943,8 +971,11 @@ class MiniAppE2ETest(unittest.TestCase):
         second_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
         self.assertAlmostEqual(second_ratio, 2 / 6, delta=0.02)
 
-        self.page.locator(".exercise-card").filter(has_text="Тяга верт.").locator(
-            '[data-action="remove-draft-exercise"]'
+        self.page.evaluate(
+            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(9)"
+        )
+        self.page.locator(".draft-exercise-swipe-card").filter(has_text="Тяга верт.").locator(
+            '.draft-exercise-swipe-actions [data-action="remove-draft-exercise"]'
         ).click()
         self.page.wait_for_function(
             "() => Math.abs(window.__trainerMiniAppTestApi.getTargetFabProgressRatio() - (1 / 6)) < 0.02"
@@ -953,8 +984,11 @@ class MiniAppE2ETest(unittest.TestCase):
         first_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
         self.assertAlmostEqual(first_ratio, 1 / 6, delta=0.02)
 
-        self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
-            '[data-action="remove-draft-exercise"]'
+        self.page.evaluate(
+            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(8)"
+        )
+        self.page.locator(".draft-exercise-swipe-card").filter(has_text="Жим ногами").locator(
+            '.draft-exercise-swipe-actions [data-action="remove-draft-exercise"]'
         ).click()
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
@@ -975,8 +1009,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(leg_press_card.locator(".set-row")).to_have_count(1)
         expect(pull_down_card.locator(".set-row")).to_have_count(1)
 
-        leg_press_card.locator('[data-action="continue-exercise"]').click()
-        self.page.locator('[data-action="set-apply"]').click()
+        leg_press_card.locator(".draft-primary-add-button").click()
 
         expect(leg_press_card.locator(".set-row")).to_have_count(2)
         expect(leg_press_card.locator(".set-row").nth(1).locator(".set-row-index")).to_have_text("2.")

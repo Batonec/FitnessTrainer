@@ -222,6 +222,10 @@ button {
   background: #5f72e4;
 }
 
+.draft-swipe-action-muted {
+  background: #8f959e;
+}
+
 .workout-swipe-action-delete {
   background: #c75b5b;
 }
@@ -1071,56 +1075,195 @@ button {
 }
 
 .draft-exercise-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
   min-width: 0;
 }
 
-.draft-exercise-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.draft-inline-button {
+.draft-exercise-icon-slot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  min-width: 40px;
-  min-height: 40px;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  color: #0f0f10;
+}
+
+.draft-exercise-icon-slot .exercise-tile-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.draft-exercise-title-row .exercise-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.draft-exercise-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px;
+  gap: 12px;
+  align-items: center;
+}
+
+.draft-exercise-main {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.draft-primary-add-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 58px;
+  min-width: 58px;
+  height: 58px;
+  min-height: 58px;
   border-radius: 999px;
   padding: 0;
-  background: rgba(69, 98, 208, 0.12);
-  color: var(--success-ink);
-  transition: transform 0.14s ease, background-color 0.14s ease, opacity 0.14s ease;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.16), transparent 36%),
+    linear-gradient(180deg, #86a0f4 0%, #6f8ced 100%);
+  color: #ffffff;
+  box-shadow: 0 18px 36px rgba(88, 110, 214, 0.22);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease,
+    color 0.18s ease;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
 }
 
-.draft-inline-button:active {
-  transform: scale(0.95);
+.draft-primary-add-button::before,
+.draft-primary-add-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
-.draft-inline-button-secondary {
-  background: rgba(17, 17, 17, 0.06);
-  color: var(--page-ink);
+.draft-primary-add-button::before {
+  inset: 9px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.42) 0%,
+    rgba(255, 255, 255, 0.2) 42%,
+    transparent 70%
+  );
+  opacity: 0;
+  transform: scale(0.32);
+  transition: opacity 0.22s ease, transform 0.28s ease;
 }
 
-.draft-inline-button-muted {
-  background: rgba(17, 17, 17, 0.09);
-  color: rgba(17, 17, 17, 0.56);
+.draft-primary-add-button::after {
+  inset: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  opacity: 0;
+  transform: scale(0.82);
 }
 
-.draft-inline-button-danger {
-  background: rgba(176, 74, 74, 0.12);
-  color: var(--danger-ink);
+.draft-primary-add-button.is-pressing::before,
+.draft-primary-add-button:active::before {
+  opacity: 1;
+  transform: scale(1.14);
 }
 
-.draft-action-icon {
-  width: 18px;
-  height: 18px;
+.draft-primary-add-button.is-longpress-arming {
+  color: #ffffff;
+  box-shadow:
+    0 18px 36px rgba(88, 110, 214, 0.26),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.draft-primary-add-button.is-longpress-arming::after {
+  animation: draft-add-button-hold 380ms linear forwards;
+}
+
+.draft-primary-add-button.is-longpress-arming::before {
+  opacity: 0.4;
+  transform: scale(0.92);
+}
+
+.draft-primary-add-button.is-longpress-fired {
+  animation: draft-add-button-fire 220ms cubic-bezier(0.22, 0.8, 0.2, 1) both;
+}
+
+.draft-primary-add-button:active {
+  transform: scale(0.97);
+  box-shadow: 0 12px 24px rgba(88, 110, 214, 0.2);
+}
+
+.draft-primary-add-button .draft-action-icon {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
   display: block;
   flex: 0 0 auto;
+}
+
+.draft-primary-add-button.is-longpress-arming .draft-action-icon {
+  animation: draft-add-icon-hold 380ms linear forwards;
+}
+
+@keyframes draft-add-button-hold {
+  0% {
+    opacity: 0.18;
+    transform: scale(0.84);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  70% {
+    opacity: 0.84;
+    transform: scale(1.02);
+    border-color: rgba(255, 255, 255, 0.44);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1.08);
+    border-color: rgba(255, 255, 255, 0.6);
+  }
+}
+
+@keyframes draft-add-icon-hold {
+  0% {
+    transform: scale(1);
+  }
+
+  65% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1.13);
+  }
+}
+
+@keyframes draft-add-button-fire {
+  0% {
+    transform: scale(1);
+  }
+
+  45% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1);
+  }
 }
 
 .set-row-editable {
@@ -1424,6 +1567,15 @@ button {
   margin-top: 10px;
 }
 
+.exercise-picker-group-title {
+  margin: 0 0 10px;
+  color: var(--page-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .exercise-picker-complete {
   padding: 8px 2px 4px;
   text-align: center;
@@ -1516,6 +1668,11 @@ button {
 
 .exercise-picker-more-toggle {
   font-size: 13px;
+}
+
+.exercise-picker-empty-note {
+  width: 100%;
+  text-align: center;
 }
 
 .center-text {
