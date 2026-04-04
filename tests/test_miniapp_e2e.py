@@ -579,6 +579,15 @@ class MiniAppE2ETest(unittest.TestCase):
 
         card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
         expect(card.locator(".draft-exercise-icon-slot svg")).to_have_count(1)
+        title_row_classes = self.page.evaluate(
+            """
+            () => Array.from(
+              document.querySelector('.exercise-card .draft-exercise-title-row').children
+            ).map((node) => node.className)
+            """
+        )
+        self.assertEqual(title_row_classes[0], "exercise-name")
+        self.assertEqual(title_row_classes[1], "draft-exercise-icon-slot")
         expect(card.locator(".draft-primary-add-button")).to_have_attribute(
             "data-longpress-action", "continue-exercise"
         )
@@ -591,11 +600,9 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(card.locator(".draft-primary-add-button svg")).to_have_count(1)
         expect(card.locator('[data-action="remove-last-draft-set"]')).to_have_count(0)
         expect(card.locator('[data-action="remove-draft-exercise"]')).to_have_count(0)
-        self.page.evaluate(
-            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(8)"
-        )
-        expect(self.page.locator('.draft-exercise-swipe-actions [data-action="remove-last-draft-set"]')).to_have_attribute("title", "Удалить последний сет")
-        expect(self.page.locator('.draft-exercise-swipe-actions [data-action="remove-draft-exercise"]')).to_have_attribute("title", "Удалить упражнение")
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.openDraftExerciseActionSheet(8)")
+        expect(self.page.locator('.draft-card-action-sheet [data-action="remove-last-draft-set"]')).to_have_attribute("data-exercise-id", "8")
+        expect(self.page.locator('.draft-card-action-sheet [data-action="remove-draft-exercise"]')).to_have_attribute("data-exercise-id", "8")
         expect(card.locator(".set-row-remove-button")).to_have_count(0)
 
     def test_draft_exercise_card_can_remove_last_set_from_header_action(self) -> None:
@@ -609,13 +616,13 @@ class MiniAppE2ETest(unittest.TestCase):
         ).click()
 
         card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
-        expect(card.locator(".set-row")).to_have_count(2)
-
-        self.page.evaluate(
-            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(8)"
-        )
-        self.page.locator('.draft-exercise-swipe-actions [data-action="remove-last-draft-set"]').click()
         expect(card.locator(".set-row")).to_have_count(1)
+        expect(card.locator(".draft-set-summary-value")).to_contain_text("×2")
+
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.openDraftExerciseActionSheet(8)")
+        self.page.locator('.draft-card-action-sheet [data-action="remove-last-draft-set"]').click()
+        expect(card.locator(".set-row")).to_have_count(1)
+        expect(card.locator(".draft-set-summary-value")).not_to_contain_text("×2")
 
     def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
         self.seed_popular_exercise_picker_history()
@@ -932,6 +939,19 @@ class MiniAppE2ETest(unittest.TestCase):
         save_fab = self.page.locator('[data-action="finish-workout"]').first
         expect(save_fab).not_to_have_class(re.compile(r".*is-icon-morph.*"))
 
+    def test_new_workout_save_fab_has_loading_state_while_saving(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.setSavingWorkout(true)")
+
+        save_fab = self.page.locator('[data-action="finish-workout"]').first
+        expect(save_fab).to_have_class(re.compile(r".*is-saving.*"))
+        expect(save_fab.locator(".save-loading-icon")).to_have_count(1)
+        expect(save_fab.locator(".fab-saving-shimmer")).to_have_count(1)
+
     def test_workout_progress_ring_first_step_uses_true_linear_ratio(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
@@ -971,12 +991,8 @@ class MiniAppE2ETest(unittest.TestCase):
         second_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
         self.assertAlmostEqual(second_ratio, 2 / 6, delta=0.02)
 
-        self.page.evaluate(
-            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(9)"
-        )
-        self.page.locator(".draft-exercise-swipe-card").filter(has_text="Тяга верт.").locator(
-            '.draft-exercise-swipe-actions [data-action="remove-draft-exercise"]'
-        ).click()
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.openDraftExerciseActionSheet(9)")
+        self.page.locator('.draft-card-action-sheet [data-action="remove-draft-exercise"]').click()
         self.page.wait_for_function(
             "() => Math.abs(window.__trainerMiniAppTestApi.getTargetFabProgressRatio() - (1 / 6)) < 0.02"
         )
@@ -984,12 +1000,8 @@ class MiniAppE2ETest(unittest.TestCase):
         first_ratio = self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()")
         self.assertAlmostEqual(first_ratio, 1 / 6, delta=0.02)
 
-        self.page.evaluate(
-            "() => window.__trainerMiniAppTestApi.openDraftExerciseSwipe(8)"
-        )
-        self.page.locator(".draft-exercise-swipe-card").filter(has_text="Жим ногами").locator(
-            '.draft-exercise-swipe-actions [data-action="remove-draft-exercise"]'
-        ).click()
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.openDraftExerciseActionSheet(8)")
+        self.page.locator('.draft-card-action-sheet [data-action="remove-draft-exercise"]').click()
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
@@ -1011,12 +1023,12 @@ class MiniAppE2ETest(unittest.TestCase):
 
         leg_press_card.locator(".draft-primary-add-button").click()
 
-        expect(leg_press_card.locator(".set-row")).to_have_count(2)
-        expect(leg_press_card.locator(".set-row").nth(1).locator(".set-row-index")).to_have_text("2.")
+        expect(leg_press_card.locator(".set-row")).to_have_count(1)
+        expect(leg_press_card.locator(".draft-set-summary-value")).to_contain_text("×2")
         expect(leg_press_card).to_have_class(re.compile(r".*exercise-card-active.*"))
         expect(pull_down_card.locator(".set-row")).to_have_count(1)
 
-    def test_draft_set_rows_use_compact_numbered_format(self) -> None:
+    def test_draft_set_rows_use_same_compact_summary_rules_as_history(self) -> None:
         self.open_app()
         self.open_new_workout()
 
@@ -1024,9 +1036,71 @@ class MiniAppE2ETest(unittest.TestCase):
         self.add_default_set()
 
         first_set = self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(".set-row").first
-        expect(first_set.locator(".set-row-index")).to_have_text("1.")
-        expect(first_set.locator(".set-row-value")).to_contain_text("кг ×")
+        expect(first_set.locator(".draft-set-summary-value")).to_contain_text("кг ×")
+        expect(first_set.locator(".set-row-index")).to_have_count(0)
         expect(first_set).not_to_contain_text("Сет 1")
+
+        self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
+            ".draft-primary-add-button"
+        ).click()
+        expect(first_set.locator(".draft-set-summary-value")).to_contain_text("×2")
+
+    def test_draft_set_summary_only_taps_on_text_and_edits_latest_set(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
+            ".draft-primary-add-button"
+        ).click()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        summary_button = card.locator(".draft-set-summary-button").first
+        summary_value = card.locator(".draft-set-summary-value").first
+
+        card_box = card.bounding_box()
+        button_box = summary_button.bounding_box()
+        self.assertIsNotNone(card_box)
+        self.assertIsNotNone(button_box)
+        self.assertLess(button_box["width"], card_box["width"] - 40)
+
+        before_text = summary_value.text_content()
+        match = re.search(r"^([0-9]+(?:,[0-9]+)?)кг ×([0-9]+)×2$", before_text or "")
+        self.assertIsNotNone(match)
+        weight_text = match.group(1)
+        reps_value = int(match.group(2))
+
+        summary_button.click()
+        self.page.locator('[data-action="set-reps-dec"]').click()
+        self.page.locator('[data-action="set-apply"]').click()
+
+        expect(summary_value).to_have_text(f"{weight_text}кг ×{reps_value}, {reps_value - 1}")
+
+    def test_draft_card_action_sheet_shows_remove_actions(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.openDraftExerciseActionSheet(8)")
+
+        sheet = self.page.locator(".draft-card-action-sheet")
+        expect(sheet).to_be_visible()
+        expect(sheet).to_contain_text("Удалить сет")
+        expect(sheet).to_contain_text("Удалить упражнение")
+
+    def test_draft_card_action_sheet_dismisses_on_overlay_tap(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.evaluate("() => window.__trainerMiniAppTestApi.openDraftExerciseActionSheet(8)")
+
+        expect(self.page.locator(".draft-card-action-sheet")).to_be_visible()
+        self.page.locator(".draft-card-menu-overlay").click(position={"x": 12, "y": 12})
+        expect(self.page.locator(".draft-card-action-sheet")).to_have_count(0)
 
     def test_returning_from_new_restores_trainings_scroll_position(self) -> None:
         self.seed_workout_history()

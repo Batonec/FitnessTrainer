@@ -28,6 +28,8 @@ const WORKOUT_SWIPE_EDGE_START_PX = 92;
 const WORKOUT_SWIPE_CLICK_GUARD_MS = 320;
 const DRAFT_ADD_LONG_PRESS_MS = 380;
 const DRAFT_ADD_LONG_PRESS_MOVE_PX = 10;
+const DRAFT_CARD_LONG_PRESS_MS = 380;
+const DRAFT_CARD_LONG_PRESS_MOVE_PX = 10;
 
 const state = {
   booting: true,
@@ -66,6 +68,7 @@ const state = {
   currentSetReps: 12,
   currentSetWeight: 0,
   flashMessage: "",
+  draftCardActionMenuExerciseId: null,
 };
 
 let flashTimeoutId = null;
@@ -95,22 +98,35 @@ let skipNextNewWorkoutSaveFabEnterAnimation = false;
 let pendingNewWorkoutSaveFabIconMorph = false;
 let draftAddLongPressGesture = null;
 let draftAddLongPressClickGuard = null;
+let draftCardLongPressGesture = null;
+let draftCardActionMenuPresence = "hidden";
+let draftCardActionMenuExitTimeoutId = null;
+let draftCardActionMenuEnterFrameId = null;
+let draftCardActionMenuAfterExit = null;
 
 root.addEventListener("click", handleClick);
 root.addEventListener("change", handleChange);
 root.addEventListener("pointerdown", handleSwipePointerDown);
+root.addEventListener("pointerdown", handleDraftCardMenuOverlayPointerDown);
 root.addEventListener("pointerdown", handleDraftAddButtonPointerDown);
+root.addEventListener("pointerdown", handleDraftExerciseCardPointerDown);
 root.addEventListener("contextmenu", handleDraftAddButtonContextMenu);
+root.addEventListener("contextmenu", handleDraftExerciseCardContextMenu);
 window.addEventListener("pointermove", handleSwipePointerMove, { passive: false });
 window.addEventListener("pointermove", handleDraftAddButtonPointerMove, { passive: true });
+window.addEventListener("pointermove", handleDraftExerciseCardPointerMove, { passive: true });
 window.addEventListener("pointerup", handleSwipePointerUp);
 window.addEventListener("pointerup", handleDraftAddButtonPointerUp);
+window.addEventListener("pointerup", handleDraftExerciseCardPointerUp);
 window.addEventListener("pointercancel", handleSwipePointerUp);
 window.addEventListener("pointercancel", handleDraftAddButtonPointerUp);
+window.addEventListener("pointercancel", handleDraftExerciseCardPointerUp);
 window.addEventListener("popstate", handlePopState);
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.isAddingSet) {
     cancelAddingSet();
+  } else if (event.key === "Escape" && state.draftCardActionMenuExerciseId != null) {
+    dismissDraftCardActionMenu();
   }
 });
 installTestApi();
@@ -410,10 +426,19 @@ function handleClick(event) {
       removeDraftSet(Number(actionTarget.dataset.exerciseId), Number(actionTarget.dataset.setIndex));
       break;
     case "remove-last-draft-set":
-      removeLastDraftSet(Number(actionTarget.dataset.exerciseId));
+      dismissDraftCardActionMenuThen(() =>
+        removeLastDraftSet(Number(actionTarget.dataset.exerciseId))
+      );
       break;
     case "remove-draft-exercise":
-      removeDraftExercise(Number(actionTarget.dataset.exerciseId));
+      dismissDraftCardActionMenuThen(() =>
+        removeDraftExercise(Number(actionTarget.dataset.exerciseId))
+      );
+      break;
+    case "dismiss-draft-card-menu":
+      if (!event.target.closest(".draft-card-action-sheet")) {
+        dismissDraftCardActionMenu();
+      }
       break;
     case "apply-workout-plan":
       applyWorkoutPlanSuggestion();
@@ -513,6 +538,7 @@ function setCurrentTab(tab) {
 
   captureScrollPosition(state.currentTab);
   state.openSwipeCardId = null;
+  state.draftCardActionMenuExerciseId = null;
   state.currentTab = tab;
   pendingScreenTransition = true;
   writeTextStorage(STORAGE_KEYS.tab, tab);
@@ -568,6 +594,7 @@ function openNewWorkout() {
   rememberNewFlowOrigin();
   captureScrollPosition(state.currentTab);
   state.openSwipeCardId = null;
+  state.draftCardActionMenuExerciseId = null;
   state.currentTab = "new";
   pendingScreenTransition = true;
   writeTextStorage(STORAGE_KEYS.tab, "new");
@@ -580,6 +607,7 @@ function openNewWorkout() {
 function closeNewWorkout() {
   const returnTab = getNewFlowReturnTab();
   state.openSwipeCardId = null;
+  state.draftCardActionMenuExerciseId = null;
   if (hasOpenNewHistoryEntry) {
     queueScrollRestore(returnTab);
     window.history.back();
@@ -1195,6 +1223,7 @@ function selectExercise(exerciseId, { openSetEditor = true } = {}) {
     return;
   }
 
+  state.draftCardActionMenuExerciseId = null;
   const isNewExercise = !state.workoutExercises.some(
     (exercise) => exercise.exerciseId === selectedExercise.id
   );
@@ -1537,6 +1566,7 @@ function startEditingDraftSet(exerciseId, setIndex) {
   }
 
   focusDraftExercise(exerciseId);
+  state.draftCardActionMenuExerciseId = null;
   state.currentSetReps = Number(workoutSet.reps) || 1;
   state.currentSetWeight = Number(workoutSet.weight) || 0;
   state.activeSetEditor = { exerciseId, setIndex };
@@ -1569,6 +1599,7 @@ function updateDraftSet(exerciseId, setIndex, nextSet) {
 
 function removeDraftSet(exerciseId, setIndex) {
   state.openSwipeCardId = null;
+  state.draftCardActionMenuExerciseId = null;
   const nextExercises = [];
 
   state.workoutExercises.forEach((exercise) => {
@@ -1611,6 +1642,7 @@ function removeLastDraftSet(exerciseId) {
 
 function removeDraftExercise(exerciseId) {
   state.openSwipeCardId = null;
+  state.draftCardActionMenuExerciseId = null;
   state.workoutExercises = state.workoutExercises.filter(
     (exercise) => exercise.exerciseId !== exerciseId
   );
@@ -1626,6 +1658,7 @@ function removeDraftExercise(exerciseId) {
 function finishExercise() {
   state.isAddingSet = false;
   state.showAllExerciseOptions = false;
+  state.draftCardActionMenuExerciseId = null;
   persistDraft();
   render();
 }
@@ -2676,10 +2709,118 @@ function clearDraftAddLongPressGesture() {
   draftAddLongPressGesture = null;
 }
 
+function dismissDraftCardActionMenu(renderAfter = true) {
+  if (state.draftCardActionMenuExerciseId == null && draftCardActionMenuPresence === "hidden") {
+    return;
+  }
+
+  if (draftCardActionMenuEnterFrameId) {
+    window.cancelAnimationFrame(draftCardActionMenuEnterFrameId);
+    draftCardActionMenuEnterFrameId = null;
+  }
+  if (draftCardActionMenuExitTimeoutId) {
+    window.clearTimeout(draftCardActionMenuExitTimeoutId);
+    draftCardActionMenuExitTimeoutId = null;
+  }
+
+  draftCardActionMenuPresence = "exit";
+  if (renderAfter) {
+    render();
+  }
+  draftCardActionMenuExitTimeoutId = window.setTimeout(() => {
+    draftCardActionMenuExitTimeoutId = null;
+    state.draftCardActionMenuExerciseId = null;
+    draftCardActionMenuPresence = "hidden";
+    const afterExit = draftCardActionMenuAfterExit;
+    draftCardActionMenuAfterExit = null;
+    if (typeof afterExit === "function") {
+      afterExit();
+      return;
+    }
+    if (renderAfter) {
+      render();
+    }
+  }, 220);
+}
+
+function openDraftCardActionMenu(exerciseId) {
+  const normalizedId = Number(exerciseId);
+  if (!Number.isFinite(normalizedId)) {
+    return false;
+  }
+
+  if (draftCardActionMenuExitTimeoutId) {
+    window.clearTimeout(draftCardActionMenuExitTimeoutId);
+    draftCardActionMenuExitTimeoutId = null;
+  }
+  if (draftCardActionMenuEnterFrameId) {
+    window.cancelAnimationFrame(draftCardActionMenuEnterFrameId);
+    draftCardActionMenuEnterFrameId = null;
+  }
+
+  draftCardActionMenuAfterExit = null;
+  state.draftCardActionMenuExerciseId = normalizedId;
+  draftCardActionMenuPresence = "enter";
+  render();
+  draftCardActionMenuEnterFrameId = window.requestAnimationFrame(() => {
+    draftCardActionMenuEnterFrameId = null;
+    if (state.draftCardActionMenuExerciseId !== normalizedId) {
+      return;
+    }
+    draftCardActionMenuPresence = "visible";
+    render();
+  });
+  return true;
+}
+
+function dismissDraftCardActionMenuThen(callback) {
+  if (state.draftCardActionMenuExerciseId == null) {
+    callback?.();
+    return;
+  }
+
+  draftCardActionMenuAfterExit = callback;
+  dismissDraftCardActionMenu(true);
+}
+
+function handleDraftCardMenuOverlayPointerDown(event) {
+  const overlay = event.target.closest('[data-action="dismiss-draft-card-menu"]');
+  if (!overlay || event.target.closest(".draft-card-action-sheet")) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  dismissDraftCardActionMenu();
+}
+
+function clearDraftExerciseCardLongPressGesture() {
+  const surface = draftCardLongPressGesture?.surface;
+  if (surface) {
+    surface.classList.remove(
+      "is-card-pressing",
+      "is-card-longpress-arming",
+      "is-card-longpress-fired"
+    );
+  }
+  if (draftCardLongPressGesture?.timeoutId) {
+    window.clearTimeout(draftCardLongPressGesture.timeoutId);
+  }
+  draftCardLongPressGesture = null;
+}
+
 function triggerDraftLongPressAction(action, exerciseId) {
   if (action === "continue-exercise") {
     startAddingSetForExercise(exerciseId);
   }
+}
+
+function handleDraftExerciseCardContextMenu(event) {
+  if (!event.target.closest("[data-draft-card-longpress]")) {
+    return;
+  }
+
+  event.preventDefault();
 }
 
 function handleDraftAddButtonContextMenu(event) {
@@ -2747,6 +2888,59 @@ function handleDraftAddButtonPointerDown(event) {
   button.setPointerCapture?.(event.pointerId);
 }
 
+function handleDraftExerciseCardPointerDown(event) {
+  const surface = event.target.closest("[data-draft-card-longpress]");
+  if (!surface) {
+    return;
+  }
+
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
+  if (event.target.closest("[data-action], button, a, input, select, textarea, label")) {
+    return;
+  }
+
+  const exerciseId = Number(surface.dataset.draftExerciseId);
+  if (!Number.isFinite(exerciseId)) {
+    return;
+  }
+
+  clearDraftExerciseCardLongPressGesture();
+  surface.classList.remove("is-card-longpress-fired");
+  surface.classList.add("is-card-pressing", "is-card-longpress-arming");
+  draftCardLongPressGesture = {
+    pointerId: event.pointerId,
+    surface,
+    exerciseId,
+    startX: event.clientX,
+    startY: event.clientY,
+    fired: false,
+    timeoutId: window.setTimeout(() => {
+      if (!draftCardLongPressGesture || draftCardLongPressGesture.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const firedGesture = draftCardLongPressGesture;
+      firedGesture.fired = true;
+      firedGesture.surface.releasePointerCapture?.(event.pointerId);
+      firedGesture.surface.classList.remove("is-card-pressing", "is-card-longpress-arming");
+      firedGesture.surface.classList.add("is-card-longpress-fired");
+      draftCardLongPressGesture = null;
+      window.setTimeout(() => {
+        openDraftCardActionMenu(firedGesture.exerciseId);
+      }, 120);
+      window.setTimeout(() => {
+        firedGesture.surface.classList.remove("is-card-longpress-fired");
+      }, 260);
+      window.getSelection?.()?.removeAllRanges?.();
+    }, DRAFT_CARD_LONG_PRESS_MS),
+  };
+
+  surface.setPointerCapture?.(event.pointerId);
+}
+
 function handleDraftAddButtonPointerMove(event) {
   if (!draftAddLongPressGesture || event.pointerId !== draftAddLongPressGesture.pointerId) {
     return;
@@ -2762,6 +2956,21 @@ function handleDraftAddButtonPointerMove(event) {
   }
 }
 
+function handleDraftExerciseCardPointerMove(event) {
+  if (!draftCardLongPressGesture || event.pointerId !== draftCardLongPressGesture.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - draftCardLongPressGesture.startX;
+  const deltaY = event.clientY - draftCardLongPressGesture.startY;
+  if (
+    Math.abs(deltaX) > DRAFT_CARD_LONG_PRESS_MOVE_PX ||
+    Math.abs(deltaY) > DRAFT_CARD_LONG_PRESS_MOVE_PX
+  ) {
+    clearDraftExerciseCardLongPressGesture();
+  }
+}
+
 function handleDraftAddButtonPointerUp(event) {
   if (!draftAddLongPressGesture || event.pointerId !== draftAddLongPressGesture.pointerId) {
     return;
@@ -2771,10 +2980,32 @@ function handleDraftAddButtonPointerUp(event) {
   clearDraftAddLongPressGesture();
 }
 
+function handleDraftExerciseCardPointerUp(event) {
+  if (!draftCardLongPressGesture || event.pointerId !== draftCardLongPressGesture.pointerId) {
+    return;
+  }
+
+  const { surface, fired, timeoutId } = draftCardLongPressGesture;
+  surface.releasePointerCapture?.(event.pointerId);
+  if (!fired) {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+    surface.classList.remove("is-card-longpress-arming");
+    draftCardLongPressGesture = null;
+    window.setTimeout(() => {
+      surface.classList.remove("is-card-pressing");
+    }, 120);
+    return;
+  }
+  clearDraftExerciseCardLongPressGesture();
+}
+
 function restoreTabFromHistory(tab, options = {}) {
   const nextTab = tab === "new" ? "new" : normalizeNavTab(tab);
   if (nextTab !== "new") {
     state.openSwipeCardId = null;
+    state.draftCardActionMenuExerciseId = null;
   }
   if (options.captureCurrent !== false && nextTab !== state.currentTab) {
     captureScrollPosition(state.currentTab);
@@ -2851,19 +3082,8 @@ function installTestApi() {
       closeSwipeCard();
       return true;
     },
-    openDraftExerciseSwipe(exerciseId) {
-      const normalizedId = getDraftExerciseSwipeStateId(exerciseId);
-      if (!Number.isFinite(normalizedId)) {
-        return false;
-      }
-
-      state.openSwipeCardId = normalizedId;
-      render();
-      return true;
-    },
-    closeOpenDraftExerciseSwipe() {
-      closeSwipeCard();
-      return true;
+    openDraftExerciseActionSheet(exerciseId) {
+      return openDraftCardActionMenu(exerciseId);
     },
     getBodyWeightEntries() {
       return state.bodyWeightEntries.map((entry) => ({ ...entry }));
@@ -2885,6 +3105,11 @@ function installTestApi() {
     },
     getTargetFabProgressRatio() {
       return targetFabProgressRatio;
+    },
+    setSavingWorkout(nextValue) {
+      state.isSavingWorkout = Boolean(nextValue);
+      render();
+      return state.isSavingWorkout;
     },
     deleteBodyWeightEntry(entryId) {
       return deleteBodyWeightEntry(Number(entryId));
@@ -2951,6 +3176,8 @@ function render() {
   const nav = renderBottomNav();
   const fab = renderFloatingActionButton();
   const modal = state.isAddingSet ? renderSetModal() : "";
+  const draftCardActionMenu =
+    state.draftCardActionMenuExerciseId != null ? renderDraftCardActionMenu() : "";
   const toast = state.flashMessage ? `<div class="toast">${escapeHtml(state.flashMessage)}</div>` : "";
 
   root.innerHTML = `
@@ -2965,6 +3192,7 @@ function render() {
       ${toast}
       ${nav}
       ${modal}
+      ${draftCardActionMenu}
     </div>
   `;
   pendingScreenTransition = false;
@@ -3255,19 +3483,23 @@ function summarizeExerciseSets(sets) {
     return {
       parts: ["Пока нет сетов"],
       notes: [],
+      segments: [],
     };
   }
 
   const grouped = [];
   let current = null;
 
-  sets.forEach((set) => {
+  sets.forEach((set, index) => {
     const weight = Number(set.weight) || 0;
     const reps = Number(set.reps) || 0;
     const note = typeof set.notes === "string" ? set.notes.trim() : "";
 
     if (current && current.weight === weight) {
       current.reps.push(reps);
+      if (note) {
+        current.notes.push(note);
+      }
     } else {
       if (current) {
         grouped.push(current);
@@ -3275,6 +3507,8 @@ function summarizeExerciseSets(sets) {
       current = {
         weight,
         reps: [reps],
+        notes: note ? [note] : [],
+        editSetIndex: index,
       };
     }
   });
@@ -3283,11 +3517,18 @@ function summarizeExerciseSets(sets) {
     grouped.push(current);
   }
 
+  const segments = grouped.map((group) => ({
+    label: `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`,
+    editSetIndex: group.editSetIndex,
+    notes: group.notes,
+  }));
+
   return {
-    parts: grouped.map((group) => `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`),
+    parts: segments.map((segment) => segment.label),
     notes: sets
       .map((set) => (typeof set.notes === "string" ? set.notes.trim() : ""))
       .filter(Boolean),
+    segments,
   };
 }
 
@@ -3898,68 +4139,44 @@ function renderNewWorkoutPlanSuggestionCard(plan) {
 }
 
 function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard = false } = {}) {
-  const swipeStateId = getDraftExerciseSwipeStateId(exercise.exerciseId);
-  const isSwipeOpen = state.openSwipeCardId === swipeStateId;
   return `
-    <section
-      class="workout-swipe-card draft-exercise-swipe-card ${isSwipeOpen ? "workout-swipe-card-open" : ""}"
-      data-workout-swipe-card
-    >
-      <div class="workout-swipe-actions draft-exercise-swipe-actions" data-workout-swipe-actions>
-        <button
-          class="workout-swipe-action draft-swipe-action-muted"
-          data-action="remove-last-draft-set"
-          data-exercise-id="${exercise.exerciseId}"
-          aria-label="Удалить последний сет"
-          title="Удалить последний сет"
-        >
-          ${renderSwipeActionIcon("delete")}
-          <span class="sr-only">Удалить последний сет</span>
-        </button>
-        <button
-          class="workout-swipe-action workout-swipe-action-delete"
-          data-action="remove-draft-exercise"
-          data-exercise-id="${exercise.exerciseId}"
-          aria-label="Удалить упражнение"
-          title="Удалить упражнение"
-        >
-          ${renderSwipeActionIcon("delete")}
-          <span class="sr-only">Удалить упражнение</span>
-        </button>
-      </div>
+    <section class="draft-exercise-card-shell">
       <article
-        class="surface-card exercise-card workout-card-surface ${isSelected ? "exercise-card-active" : ""} ${isSwipeOpen ? "workout-card-surface-open" : ""}"
-        data-workout-swipe-surface
-        data-workout-id="${swipeStateId}"
+        class="surface-card exercise-card workout-card-surface ${isSelected ? "exercise-card-active" : ""}"
         data-draft-exercise-id="${exercise.exerciseId}"
+        data-draft-card-longpress
       >
+        <md-ripple class="draft-exercise-material-ripple"></md-ripple>
         <div class="draft-exercise-layout">
           <div class="draft-exercise-main">
             <div class="draft-exercise-head">
               <div class="exercise-title-row draft-exercise-title-row">
+                <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
                 <span class="draft-exercise-icon-slot" aria-hidden="true">
                   ${exerciseIconMarkup(exercise.exerciseName)}
                 </span>
-                <div class="exercise-name">${escapeHtml(exercise.exerciseName)}</div>
               </div>
             </div>
             ${
               exercise.sets.length
                 ? `
-                  <div class="set-list">
-                    ${exercise.sets
+                  ${(() => {
+                    const compactSets = summarizeExerciseSets(exercise.sets);
+                    const latestSetIndex = Math.max(0, exercise.sets.length - 1);
+                    return `
+                  <div class="set-list draft-set-summary-list">
+                    ${compactSets.segments
                       .map(
-                        (workoutSet, index) => `
-                          <div class="set-row set-row-editable">
+                        (segment) => `
+                          <div class="set-row set-row-editable set-row-summary">
                             <button
-                              class="set-row-main"
+                              class="set-row-main draft-set-summary-button"
                               data-action="edit-draft-set"
                               data-exercise-id="${exercise.exerciseId}"
-                              data-set-index="${index}"
+                              data-set-index="${latestSetIndex}"
                             >
-                              <span class="set-row-index">${index + 1}.</span>
-                              <span class="set-row-value">${escapeHtml(
-                                `${formatWeight(workoutSet.weight)} кг × ${workoutSet.reps}`
+                              <span class="set-row-value draft-set-summary-value">${escapeHtml(
+                                segment.label
                               )}</span>
                             </button>
                           </div>
@@ -3967,6 +4184,15 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
                       )
                       .join("")}
                   </div>
+                  ${
+                    compactSets.notes.length
+                      ? `<div class="set-notes-inline">${compactSets.notes
+                          .map((note) => escapeHtml(note))
+                          .join(" · ")}</div>`
+                      : ""
+                  }
+                    `;
+                  })()}
                 `
                 : `<div class="exercise-empty">Добавь первый сет, потом можно будет чередовать это упражнение с другими.</div>`
             }
@@ -4006,15 +4232,6 @@ function renderWorkoutMetaCard() {
       }</div>
     </section>
   `;
-}
-
-function getDraftExerciseSwipeStateId(exerciseId) {
-  const normalizedId = Number(exerciseId);
-  if (!Number.isFinite(normalizedId)) {
-    return NaN;
-  }
-
-  return 1000000 + normalizedId;
 }
 
 function renderCurrentExerciseCard(exerciseName) {
@@ -4153,6 +4370,46 @@ function renderSetModal() {
           <div class="modal-actions">
             <button class="secondary-button" data-action="set-cancel">Отмена</button>
             <button class="primary-button" data-action="set-apply">Применить</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderDraftCardActionMenu() {
+  const exercise = state.workoutExercises.find(
+    (item) => item.exerciseId === state.draftCardActionMenuExerciseId
+  );
+  if (!exercise) {
+    return "";
+  }
+
+  return `
+    <div
+      class="modal-overlay draft-card-menu-overlay draft-card-menu-overlay-${draftCardActionMenuPresence}"
+      data-action="dismiss-draft-card-menu"
+    >
+      <section class="modal-card draft-card-action-sheet draft-card-action-sheet-${draftCardActionMenuPresence}">
+        <div class="stack">
+          <div class="modal-heading">Карточка упражнения</div>
+          <div class="draft-card-action-sheet-title">${escapeHtml(exercise.exerciseName)}</div>
+          <div class="draft-card-action-sheet-actions">
+            <button
+              class="secondary-button draft-card-action-sheet-button"
+              data-action="remove-last-draft-set"
+              data-exercise-id="${exercise.exerciseId}"
+              ${exercise.sets.length ? "" : "disabled"}
+            >
+              Удалить сет
+            </button>
+            <button
+              class="secondary-button draft-card-action-sheet-button draft-card-action-sheet-button-danger"
+              data-action="remove-draft-exercise"
+              data-exercise-id="${exercise.exerciseId}"
+            >
+              Удалить упражнение
+            </button>
           </div>
         </div>
       </section>
@@ -4305,16 +4562,18 @@ function renderFloatingActionButton() {
     }
 
     if (newWorkoutFabPresence !== "hidden") {
+      const saveFabContent = state.isSavingWorkout
+        ? `${draftProgressRing}<span class="fab-saving-shimmer" aria-hidden="true"></span>${iconMarkup("save-loading")}`
+        : `${draftProgressRing}${shouldMorphSaveFabIcon ? renderMorphingFabIcon("new", "save") : iconMarkup("save")}`;
       actions.push(`
         <button
-          class="floating-action-button floating-action-button-save${draftProgressClass} ${shouldMorphSaveFabIcon ? "is-icon-morph" : ""}"
+          class="floating-action-button floating-action-button-save${draftProgressClass} ${shouldMorphSaveFabIcon && !state.isSavingWorkout ? "is-icon-morph" : ""} ${state.isSavingWorkout ? "is-saving" : ""}"
           data-action="finish-workout"
           aria-label="${state.isSavingWorkout ? "Сохраняю тренировку" : "Сохранить тренировку"}"
           ${state.isSavingWorkout ? "disabled" : ""}
           ${draftProgressData}
         >
-          ${draftProgressRing}
-          ${shouldMorphSaveFabIcon ? renderMorphingFabIcon("new", "save") : iconMarkup("save")}
+          ${saveFabContent}
         </button>
       `);
     }
@@ -4570,6 +4829,15 @@ function iconMarkup(name) {
     return `
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 12.5l4 4l8-9"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "save-loading") {
+    return `
+      <svg class="nav-icon save-loading-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle class="save-loading-track" cx="12" cy="12" r="8.5"></circle>
+        <path class="save-loading-arc" d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"></path>
       </svg>
     `;
   }
