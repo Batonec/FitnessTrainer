@@ -1373,6 +1373,50 @@ class MiniAppE2ETest(unittest.TestCase):
 
         expect(summary_value).to_have_text(f"{weight_text}кг ×{reps_value}, {reps_value - 1}")
 
+    def test_set_modal_can_save_effort_and_history_renders_it(self) -> None:
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        expect(self.page.locator(".modal-card")).to_be_visible()
+        hard_button = self.page.locator('[data-action="set-effort"][data-effort="hard"]')
+        hard_button.click()
+        expect(hard_button).to_have_attribute("aria-pressed", "true")
+        self.page.locator('[data-action="set-apply"]').click()
+
+        draft_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(draft_card.locator(".draft-set-summary-value")).to_contain_text("😣")
+
+        self.page.locator('[data-action="finish-workout"]').click()
+        history_card = self.page.locator(".workout-card").filter(has_text="Жим ногами")
+        expect(history_card).to_contain_text("😣")
+
+    def test_new_workout_reference_line_reuses_previous_set_effort(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="effort-reference-seed",
+            workout_date="2026-03-27",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80, "effort": "hard", "notes": None},
+                        {"reps": 13, "weight": 90, "effort": "ok", "notes": None},
+                    ],
+                }
+            ],
+        )
+        self.open_app()
+        self.open_new_workout()
+
+        draft_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(draft_card.locator(".draft-exercise-reference-line")).to_contain_text("😣")
+        expect(draft_card.locator(".draft-exercise-reference-line")).to_contain_text("😐")
+
+        draft_card.locator(".draft-primary-add-button").click()
+        expect(draft_card.locator(".draft-set-summary-value")).not_to_contain_text("😣")
+        expect(draft_card.locator(".draft-set-summary-value")).not_to_contain_text("😐")
+
     def test_draft_card_action_sheet_shows_remove_actions(self) -> None:
         self.open_app()
         self.open_new_workout()

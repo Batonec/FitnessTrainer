@@ -187,8 +187,8 @@ class MiniAppStoreTest(unittest.TestCase):
                             "exercise_id": 5,
                             "name": "Cable Fly",
                             "sets": [
-                                {"reps": 12, "weight": 25, "notes": "  "},
-                                {"reps": 10, "weight": 30, "notes": " Last hard set "},
+                                {"reps": 12, "weight": 25, "effort": "  easy  ", "notes": "  "},
+                                {"reps": 10, "weight": 30, "effort": " HARD ", "notes": " Last hard set "},
                             ],
                         }
                     ],
@@ -203,7 +203,35 @@ class MiniAppStoreTest(unittest.TestCase):
             [1, 2],
         )
         self.assertIsNone(workout["data"]["exercises"][0]["sets"][0]["notes"])
+        self.assertEqual(workout["data"]["exercises"][0]["sets"][0]["effort"], "easy")
         self.assertEqual(workout["data"]["exercises"][0]["sets"][1]["notes"], "Last hard set")
+        self.assertEqual(workout["data"]["exercises"][0]["sets"][1]["effort"], "hard")
+
+    def test_save_workout_rejects_invalid_set_effort(self) -> None:
+        user = self.store.ensure_debug_user("browser-default")
+
+        with self.assertRaisesRegex(ValueError, "Set effort must be one of easy, ok, hard"):
+            self.store.save_workout(
+                int(user["id"]),
+                {
+                    "client_id": "invalid-effort",
+                    "workout_date": "2026-03-28",
+                    "plan_id": None,
+                    "data": {
+                        "notes": None,
+                        "load_type": None,
+                        "exercises": [
+                            {
+                                "exercise_id": 5,
+                                "name": "Cable Fly",
+                                "sets": [
+                                    {"reps": 12, "weight": 25, "effort": "monster"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            )
 
     def test_update_workout_rewrites_payload_and_bumps_updated_at(self) -> None:
         user = self.store.ensure_debug_user("browser-default")

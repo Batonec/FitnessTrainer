@@ -2026,6 +2026,73 @@ button {
   margin-inline: auto;
 }
 
+.set-effort-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.set-effort-button {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.08);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.set-effort-button:active {
+  transform: scale(0.96);
+}
+
+.set-effort-button-emoji {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.set-effort-easy {
+  background: rgba(125, 197, 131, 0.14);
+  border-color: rgba(125, 197, 131, 0.22);
+}
+
+.set-effort-ok {
+  background: rgba(255, 215, 102, 0.18);
+  border-color: rgba(236, 185, 70, 0.26);
+}
+
+.set-effort-hard {
+  background: rgba(234, 109, 109, 0.12);
+  border-color: rgba(214, 92, 92, 0.24);
+}
+
+.set-effort-button.is-selected {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(17, 24, 39, 0.14);
+}
+
+.set-effort-easy.is-selected {
+  background: rgba(125, 197, 131, 0.26);
+  border-color: rgba(91, 166, 98, 0.38);
+}
+
+.set-effort-ok.is-selected {
+  background: rgba(255, 215, 102, 0.28);
+  border-color: rgba(216, 168, 54, 0.4);
+}
+
+.set-effort-hard.is-selected {
+  background: rgba(234, 109, 109, 0.22);
+  border-color: rgba(198, 76, 76, 0.4);
+}
+
 .value-stepper {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr) 58px;

@@ -30,6 +30,11 @@ const DRAFT_ADD_LONG_PRESS_MS = 380;
 const DRAFT_ADD_LONG_PRESS_MOVE_PX = 10;
 const DRAFT_CARD_LONG_PRESS_MS = 380;
 const DRAFT_CARD_LONG_PRESS_MOVE_PX = 10;
+const SET_EFFORT_OPTIONS = [
+  { key: "easy", icon: "🙂", label: "Легко" },
+  { key: "ok", icon: "😐", label: "Норм" },
+  { key: "hard", icon: "😣", label: "Тяжело" },
+];
 
 const state = {
   booting: true,
@@ -67,6 +72,7 @@ const state = {
   isSavingBodyWeight: false,
   currentSetReps: 12,
   currentSetWeight: 0,
+  currentSetEffort: null,
   flashMessage: "",
   draftCardActionMenuExerciseId: null,
 };
@@ -490,6 +496,13 @@ function handleClick(event) {
       state.currentSetReps = Math.max(1, state.currentSetReps - 1);
       render();
       break;
+    case "set-effort":
+      state.currentSetEffort =
+        state.currentSetEffort === actionTarget.dataset.effort
+          ? null
+          : normalizeSetEffort(actionTarget.dataset.effort);
+      render();
+      break;
     case "set-apply":
       applySet();
       break;
@@ -756,6 +769,7 @@ function normalizeDraftWorkoutExercises(value) {
             .map((workoutSet) => ({
               reps: Math.max(1, Number(workoutSet.reps) || 1),
               weight: Math.max(0, Number(workoutSet.weight) || 0),
+              effort: normalizeSetEffort(workoutSet.effort),
               notes: workoutSet.notes ?? null,
             }))
         : [],
@@ -1440,6 +1454,7 @@ function startEditingWorkout(workoutId) {
     sets: exercise.sets.map((workoutSet) => ({
       reps: Number(workoutSet.reps) || 1,
       weight: Number(workoutSet.weight) || 0,
+      effort: normalizeSetEffort(workoutSet.effort),
       notes: workoutSet.notes ?? null,
       })),
   }));
@@ -1452,6 +1467,7 @@ function startEditingWorkout(workoutId) {
   state.activeSetEditor = null;
   state.isAddingSet = false;
   state.isSavingWorkout = false;
+  state.currentSetEffort = null;
   state.showAllExerciseOptions = false;
   writeTextStorage(STORAGE_KEYS.tab, "new");
   persistDraft();
@@ -1527,6 +1543,7 @@ function openDraftSetEditorForExercise(exerciseId) {
   );
   state.currentSetReps = plannedSet.reps;
   state.currentSetWeight = plannedSet.weight;
+  state.currentSetEffort = normalizeSetEffort(plannedSet.effort);
   state.activeSetEditor = {
     exerciseId: selectedExercise.id,
     setIndex: null,
@@ -1564,6 +1581,7 @@ function cancelAddingSet() {
   }
   state.isAddingSet = false;
   state.activeSetEditor = null;
+  state.currentSetEffort = null;
   persistDraft();
   render();
 }
@@ -1597,6 +1615,7 @@ function applySet() {
   const nextSet = {
     reps: state.currentSetReps,
     weight: state.currentSetWeight,
+    effort: state.currentSetEffort,
     notes: null,
   };
   if (state.activeSetEditor && Number.isInteger(state.activeSetEditor.setIndex)) {
@@ -1611,6 +1630,7 @@ function applySet() {
   }
   state.activeSetEditor = null;
   state.isAddingSet = false;
+  state.currentSetEffort = null;
   render();
 }
 
@@ -1662,6 +1682,7 @@ function startEditingDraftSet(exerciseId, setIndex) {
   state.draftCardActionMenuExerciseId = null;
   state.currentSetReps = Number(workoutSet.reps) || 1;
   state.currentSetWeight = Number(workoutSet.weight) || 0;
+  state.currentSetEffort = normalizeSetEffort(workoutSet.effort);
   state.activeSetEditor = { exerciseId, setIndex };
   state.isAddingSet = true;
   persistDraft();
@@ -1681,6 +1702,7 @@ function updateDraftSet(exerciseId, setIndex, nextSet) {
           ? {
               reps: nextSet.reps,
               weight: nextSet.weight,
+              effort: normalizeSetEffort(nextSet.effort),
               notes: nextSet.notes ?? null,
             }
           : workoutSet
@@ -1720,6 +1742,7 @@ function removeDraftSet(exerciseId, setIndex) {
   }
   state.activeSetEditor = null;
   state.isAddingSet = false;
+  state.currentSetEffort = null;
   persistDraft();
   render();
 }
@@ -1744,6 +1767,7 @@ function removeDraftExercise(exerciseId) {
   }
   state.activeSetEditor = null;
   state.isAddingSet = false;
+  state.currentSetEffort = null;
   persistDraft();
   render();
 }
@@ -1761,9 +1785,10 @@ function buildDraftExercisesFromPlan(plan) {
     exerciseId: Number(exercise.exercise_id) || 0,
     exerciseName: String(exercise.name || "").trim(),
     sets: Array.isArray(exercise.sets)
-      ? exercise.sets.map((set) => ({
+        ? exercise.sets.map((set) => ({
           reps: Math.max(1, Number(set.reps) || 1),
           weight: Math.max(0, Number(set.weight) || 0),
+          effort: null,
           notes: typeof set.notes === "string" && set.notes.trim() ? set.notes.trim() : null,
         }))
       : [],
@@ -1871,6 +1896,7 @@ function resetDraftState() {
   state.isAddingSet = false;
   state.currentSetReps = 12;
   state.currentSetWeight = 0;
+  state.currentSetEffort = null;
   localStorage.removeItem(STORAGE_KEYS.draft);
 }
 
@@ -1921,6 +1947,7 @@ function buildLocalWorkout() {
         sets: exercise.sets.map((set, index) => ({
           reps: set.reps,
           notes: set.notes ?? null,
+          effort: normalizeSetEffort(set.effort),
           weight: set.weight,
           set_index: index + 1,
         })),
@@ -1991,7 +2018,7 @@ function getLatestExerciseSource(
 
 function buildNormalizedExerciseSets(
   sets,
-  { incrementReps = 0, preserveNotes = true } = {}
+  { incrementReps = 0, preserveNotes = true, preserveEffort = true } = {}
 ) {
   return (Array.isArray(sets) ? sets : [])
     .map((set, index) => {
@@ -2002,10 +2029,12 @@ function buildNormalizedExerciseSets(
         preserveNotes && typeof set?.notes === "string" && set.notes.trim()
           ? set.notes.trim()
           : null;
+      const effort = preserveEffort ? normalizeSetEffort(set?.effort) : null;
 
       return {
         reps: Math.max(1, rawReps + incrementReps),
         weight: Math.max(0, rawWeight),
+        effort,
         notes,
         set_index:
           Number.isFinite(rawSetIndex) && rawSetIndex > 0 ? rawSetIndex : index + 1,
@@ -2060,8 +2089,10 @@ function getExercisePlanningContext(
   const plannedSets = buildNormalizedExerciseSets(previousSets, {
     incrementReps: 1,
     preserveNotes: false,
+    preserveEffort: false,
   }).map((set, index) => ({
     ...set,
+    effort: null,
     notes: null,
     set_index: index + 1,
   }));
@@ -2114,11 +2145,12 @@ function getPlannedSetForExercise(
     excludeWorkoutId,
   });
   if (!planningContext || !planningContext.plannedSets.length) {
-    return {
-      reps: 12,
-      weight: 0,
-      notes: null,
-    };
+      return {
+        reps: 12,
+        weight: 0,
+        effort: null,
+        notes: null,
+      };
   }
 
   const templateSet =
@@ -2128,6 +2160,7 @@ function getPlannedSetForExercise(
   return {
     reps: templateSet.reps,
     weight: templateSet.weight,
+    effort: null,
     notes: null,
   };
 }
@@ -3545,9 +3578,11 @@ function buildNextWorkoutPlanSuggestion(workouts) {
     sets: buildNormalizedExerciseSets(exercise.sets, {
       incrementReps: 1,
       preserveNotes: true,
+      preserveEffort: false,
     }).map((set, index) => ({
       reps: set.reps,
       weight: set.weight,
+      effort: null,
       notes: set.notes,
       set_index: index + 1,
     })),
@@ -3729,8 +3764,9 @@ function summarizeExerciseSets(sets) {
     const weight = Number(set.weight) || 0;
     const reps = Number(set.reps) || 0;
     const note = typeof set.notes === "string" ? set.notes.trim() : "";
+    const effort = normalizeSetEffort(set.effort);
 
-    if (current && current.weight === weight) {
+    if (current && current.weight === weight && current.effort === effort) {
       current.reps.push(reps);
       if (note) {
         current.notes.push(note);
@@ -3742,6 +3778,7 @@ function summarizeExerciseSets(sets) {
       current = {
         weight,
         reps: [reps],
+        effort,
         notes: note ? [note] : [],
         editSetIndex: index,
       };
@@ -3753,8 +3790,11 @@ function summarizeExerciseSets(sets) {
   }
 
   const segments = grouped.map((group) => ({
-    label: `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`,
+    label:
+      `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}` +
+      (group.effort ? ` ${getSetEffortMeta(group.effort).icon}` : ""),
     editSetIndex: group.editSetIndex,
+    effort: group.effort,
     notes: group.notes,
     weight: group.weight,
     reps: [...group.reps],
@@ -4688,6 +4728,21 @@ function renderSetModal() {
             </div>
           </div>
 
+          <div class="set-effort-picker" role="group" aria-label="Оценка тяжести подхода">
+            ${SET_EFFORT_OPTIONS.map((option) => `
+              <button
+                class="set-effort-button set-effort-${option.key} ${state.currentSetEffort === option.key ? "is-selected" : ""}"
+                data-action="set-effort"
+                data-effort="${option.key}"
+                aria-pressed="${state.currentSetEffort === option.key ? "true" : "false"}"
+                aria-label="${option.label}"
+                title="${option.label}"
+              >
+                <span class="set-effort-button-emoji" aria-hidden="true">${option.icon}</span>
+              </button>
+            `).join("")}
+          </div>
+
           <div class="modal-actions set-modal-actions">
             <button class="primary-button" data-action="set-apply">Применить</button>
           </div>
@@ -5036,6 +5091,18 @@ function normalizeBodyWeightInput(value) {
   }
 
   return `${integerPart || "0"}.${fractionPart}`;
+}
+
+function normalizeSetEffort(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return SET_EFFORT_OPTIONS.some((option) => option.key === normalized) ? normalized : null;
+}
+
+function getSetEffortMeta(effort) {
+  return SET_EFFORT_OPTIONS.find((option) => option.key === effort) || SET_EFFORT_OPTIONS[1];
 }
 
 function formatSignedWeight(value) {

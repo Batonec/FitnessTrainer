@@ -437,6 +437,7 @@ class ServerApiTest(unittest.TestCase):
                     exercise_name="Pull Up",
                     weight=20,
                     reps=10,
+                    effort="hard",
                     notes=" Updated pull-up day ",
                 ),
             )
@@ -448,6 +449,29 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(updated_response.payload["workout"]["workout_date"], "2026-03-27")
             self.assertEqual(updated_response.payload["workout"]["data"]["notes"], "Updated pull-up day")
             self.assertEqual(workouts_response.payload["workouts"][0]["data"]["exercises"][0]["sets"][0]["weight"], 20)
+            self.assertEqual(
+                workouts_response.payload["workouts"][0]["data"]["exercises"][0]["sets"][0]["effort"],
+                "hard",
+            )
+
+    def test_workouts_endpoint_rejects_invalid_set_effort(self) -> None:
+        with running_miniapp_server(allow_debug_user=True) as app:
+            client = JsonHttpClient(app.base_url)
+            client.request_json("POST", "/api/session/resolve", {})
+
+            response = client.request_json(
+                "POST",
+                "/api/workouts",
+                sample_workout_payload(
+                    client_id="invalid-effort-api-workout",
+                    exercise_id=4,
+                    exercise_name="Pull Up",
+                    effort="impossible",
+                ),
+            )
+
+            self.assertEqual(response.status, 400)
+            self.assertIn("Set effort must be one of easy, ok, hard", response.payload["reason"])
 
     def test_workouts_endpoint_returns_not_found_for_missing_update(self) -> None:
         with running_miniapp_server(allow_debug_user=True) as app:

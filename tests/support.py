@@ -35,6 +35,7 @@ def sample_workout_payload(
     exercise_name: str = "Bench Press",
     weight: float = 80.0,
     reps: int = 12,
+    effort: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
     return {
@@ -52,6 +53,7 @@ def sample_workout_payload(
                         {
                             "reps": reps,
                             "weight": weight,
+                            "effort": effort,
                             "notes": notes,
                         }
                     ],

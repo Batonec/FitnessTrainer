@@ -10,6 +10,7 @@ from typing import Any
 
 
 ALLOWED_LOAD_TYPES = {"heavy", "medium", "light", "deload"}
+ALLOWED_SET_EFFORTS = {"easy", "ok", "hard"}
 
 
 def utc_now() -> int:
@@ -40,6 +41,18 @@ def normalize_notes(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def normalize_set_effort(value: object) -> str | None:
+    if value is None:
+        return None
+
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text not in ALLOWED_SET_EFFORTS:
+        raise ValueError("Set effort must be one of easy, ok, hard")
+    return text
 
 
 def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -85,6 +98,7 @@ def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], 
                     "set_index": index,
                     "reps": reps,
                     "weight": weight,
+                    "effort": normalize_set_effort(raw_set.get("effort")),
                     "notes": normalize_notes(raw_set.get("notes")),
                 }
             )
