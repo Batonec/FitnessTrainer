@@ -557,7 +557,7 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_new_workout()
 
         self.select_exercise_by_name("Жим ногами")
-        self.page.locator('[data-action="set-cancel"]').click()
+        self.page.locator(".modal-overlay").click(position={"x": 16, "y": 16})
 
         leg_press_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
         expect(leg_press_card).to_have_count(1)
@@ -689,10 +689,36 @@ class MiniAppE2ETest(unittest.TestCase):
         self.select_exercise_by_name("Жим ногами")
 
         reference = self.page.locator(".draft-set-reference-card")
+        expect(self.page.locator(".modal-heading")).to_have_count(0)
+        expect(self.page.locator('[data-action="set-cancel"]')).to_have_count(0)
         expect(reference.locator(".draft-set-reference-title-row")).to_contain_text("Жим ногами")
         expect(reference.locator(".draft-set-reference-line")).to_contain_text("80кг ×15×3")
         expect(reference.locator(".draft-set-reference-line")).to_contain_text("→")
         expect(reference.locator(".draft-set-reference-line")).to_contain_text("16×3")
+        expect(self.page.locator(".value-display-compact").first).to_contain_text("кг")
+        expect(self.page.locator(".value-display-compact").nth(1)).to_contain_text("ПТ")
+        expect(self.page.locator(".set-stepper-button svg")).to_have_count(4)
+        stepper_columns = self.page.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('.set-value-stepper')).map(
+              (node) => getComputedStyle(node).gridTemplateColumns
+            )
+            """
+        )
+        self.assertEqual(len(set(stepper_columns)), 1)
+        self.assertIn("58px", stepper_columns[0])
+        self.assertGreaterEqual(
+            self.page.evaluate(
+                "() => parseFloat(getComputedStyle(document.querySelector('.set-stepper-button')).width)"
+            ),
+            56,
+        )
+        self.assertGreaterEqual(
+            self.page.evaluate(
+                "() => parseFloat(getComputedStyle(document.querySelector('.set-value-stepper')).columnGap)"
+            ),
+            16,
+        )
         self.assertEqual(
             self.page.evaluate(
                 "() => getComputedStyle(document.querySelector('.draft-set-reference-line')).flexWrap"
@@ -843,7 +869,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
-        self.page.locator('[data-action="set-cancel"]').click()
+        self.page.locator(".modal-overlay").click(position={"x": 16, "y": 16})
         expect(self.page.locator(".exercise-card")).to_have_count(6)
         expect(
             self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(".set-row")
@@ -870,7 +896,7 @@ class MiniAppE2ETest(unittest.TestCase):
         )
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
 
-        self.page.locator('[data-action="set-cancel"]').click()
+        self.page.locator(".modal-overlay").click(position={"x": 16, "y": 16})
         self.page.wait_for_timeout(100)
         self.assertEqual(
             self.page.evaluate("window.__trainerMiniAppTestApi.getTargetFabProgressRatio()"),

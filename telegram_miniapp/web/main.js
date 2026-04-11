@@ -4592,8 +4592,7 @@ function renderSetModal() {
   return `
     <div class="modal-overlay" data-action="dismiss-set-modal">
       <section class="modal-card">
-        <div class="stack">
-          <div class="modal-heading">${isEditingExistingSet ? "Редактировать сет" : "Новый сет"}</div>
+        <div class="stack set-modal-stack">
           ${
             lastReference && exerciseTitle
               ? `
@@ -4611,26 +4610,34 @@ function renderSetModal() {
               `
               : ""
           }
-          <div>
-            <div class="modal-section-title">Вес</div>
-            <div class="value-stepper">
-              <button class="stepper-button" data-action="set-weight-dec">-</button>
-              <div class="value-display">${escapeHtml(formatWeight(state.currentSetWeight))} кг</div>
-              <button class="stepper-button" data-action="set-weight-inc">+</button>
+          <div class="set-editor-grid">
+            <div class="value-stepper set-value-stepper">
+              <button class="draft-accent-circle-button set-stepper-button" data-action="set-weight-dec">
+                ${iconMarkup("draft-minus")}
+              </button>
+              <div class="value-display value-display-compact">
+                <span class="value-display-number">${escapeHtml(formatWeight(state.currentSetWeight))}</span>
+                <span class="value-display-unit">кг</span>
+              </div>
+              <button class="draft-accent-circle-button set-stepper-button" data-action="set-weight-inc">
+                ${iconMarkup("draft-add-set")}
+              </button>
+            </div>
+            <div class="value-stepper set-value-stepper">
+              <button class="draft-accent-circle-button set-stepper-button" data-action="set-reps-dec">
+                ${iconMarkup("draft-minus")}
+              </button>
+              <div class="value-display value-display-compact">
+                <span class="value-display-number">${state.currentSetReps}</span>
+                <span class="value-display-unit">ПТ</span>
+              </div>
+              <button class="draft-accent-circle-button set-stepper-button" data-action="set-reps-inc">
+                ${iconMarkup("draft-add-set")}
+              </button>
             </div>
           </div>
 
-          <div>
-            <div class="modal-section-title">Количество повторений</div>
-            <div class="value-stepper">
-              <button class="stepper-button" data-action="set-reps-dec">-</button>
-              <div class="value-display">${state.currentSetReps}</div>
-              <button class="stepper-button" data-action="set-reps-inc">+</button>
-            </div>
-          </div>
-
-          <div class="modal-actions">
-            <button class="secondary-button" data-action="set-cancel">Отмена</button>
+          <div class="modal-actions set-modal-actions">
             <button class="primary-button" data-action="set-apply">Применить</button>
           </div>
         </div>
@@ -5126,6 +5133,14 @@ function iconMarkup(name) {
     return `
       <svg class="draft-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 7v10"></path>
+        <path d="M7 12h10"></path>
+      </svg>
+    `;
+  }
+
+  if (name === "draft-minus") {
+    return `
+      <svg class="draft-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M7 12h10"></path>
       </svg>
     `;
