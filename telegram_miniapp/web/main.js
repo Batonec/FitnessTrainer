@@ -976,6 +976,60 @@ function getAvailableExercises() {
   return state.exercises.filter((exercise) => !addedIds.has(exercise.id));
 }
 
+function getDraftExerciseDisplayCards(workouts = getAllWorkouts()) {
+  const actualExercises = Array.isArray(state.workoutExercises) ? state.workoutExercises : [];
+  const catalogExercises = Array.isArray(state.exercises) ? state.exercises : [];
+  if (!catalogExercises.length) {
+    return actualExercises.map((exercise) => ({
+      ...exercise,
+      isPreview: false,
+    }));
+  }
+
+  const { primary: primarySuggestions } = getExercisePickerGroups(catalogExercises, workouts);
+  if (!primarySuggestions.length) {
+    return actualExercises.map((exercise) => ({
+      ...exercise,
+      isPreview: false,
+    }));
+  }
+
+  const actualById = new Map(
+    actualExercises.map((exercise) => [Number(exercise.exerciseId), exercise])
+  );
+  const usedActualIds = new Set();
+  const displayCards = primarySuggestions.map((exercise) => {
+    const actual = actualById.get(Number(exercise.id));
+    if (actual) {
+      usedActualIds.add(Number(actual.exerciseId));
+      return {
+        ...actual,
+        isPreview: false,
+      };
+    }
+
+    return {
+      exerciseId: Number(exercise.id),
+      exerciseName: exercise.name,
+      sets: [],
+      isPreview: true,
+    };
+  });
+
+  actualExercises.forEach((exercise) => {
+    if (usedActualIds.has(Number(exercise.exerciseId))) {
+      return;
+    }
+
+    displayCards.push({
+      ...exercise,
+      isPreview: false,
+    });
+  });
+
+  return displayCards;
+}
+
 function getWorkoutDraftProgress() {
   if (!hasWorkoutDraftSets()) {
     displayedFabProgressRatio = 0;
@@ -1439,9 +1493,15 @@ function startAddingSetForExercise(exerciseId) {
     return;
   }
 
-  focusDraftExercise(selectedExercise.id);
-  state.currentSetReps = 12;
-  state.currentSetWeight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
+  const draftExercise = focusDraftExercise(selectedExercise.id);
+  const plannedSet = getPlannedSetForExercise(
+    getAllWorkouts(),
+    selectedExercise.id,
+    draftExercise?.sets?.length ?? 0,
+    { excludeWorkoutId: state.editingWorkoutId }
+  );
+  state.currentSetReps = plannedSet.reps;
+  state.currentSetWeight = plannedSet.weight;
   state.activeSetEditor = {
     exerciseId: selectedExercise.id,
     setIndex: null,
@@ -1491,13 +1551,14 @@ function addStandardSetForExercise(exerciseId) {
     return;
   }
 
-  focusDraftExercise(selectedExercise.id);
-  const weight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
-  addSetToExercise(selectedExercise.id, {
-    reps: 12,
-    weight,
-    notes: null,
-  });
+  const draftExercise = focusDraftExercise(selectedExercise.id);
+  const plannedSet = getPlannedSetForExercise(
+    getAllWorkouts(),
+    selectedExercise.id,
+    draftExercise?.sets?.length ?? 0,
+    { excludeWorkoutId: state.editingWorkoutId }
+  );
+  addSetToExercise(selectedExercise.id, plannedSet);
 }
 
 function applySet() {
@@ -1856,20 +1917,44 @@ function inferLoadType(workoutExercises) {
 }
 
 function getWeightFromLastWorkout(workouts, exerciseId) {
+  const reference = getLatestExerciseReference(workouts, exerciseId, {
+    excludeWorkoutId: state.editingWorkoutId,
+  });
+  return reference ? reference.maxWeight : 0;
+}
+
+function getLatestExerciseSource(
+  workouts,
+  exerciseId,
+  { excludeWorkoutId = null } = {}
+) {
+  const normalizedExerciseId = Number(exerciseId);
+  if (!Number.isFinite(normalizedExerciseId) || normalizedExerciseId <= 0) {
+    return null;
+  }
+
   const sorted = sortWorkouts(workouts);
   for (const workout of sorted) {
-    const exercise = workout.data.exercises.find((item) => item.exercise_id === exerciseId);
-    if (!exercise) {
+    if (
+      excludeWorkoutId != null &&
+      Number.isFinite(Number(workout?.id)) &&
+      Number(workout.id) === Number(excludeWorkoutId)
+    ) {
       continue;
     }
 
-    const weights = exercise.sets.map((set) => set.weight || 0);
-    const maxWeight = Math.max(0, ...weights);
-    if (maxWeight > 0) {
-      return maxWeight;
+    const exercises = Array.isArray(workout?.data?.exercises) ? workout.data.exercises : [];
+    const exercise = exercises.find(
+      (item) => Number(item.exercise_id) === normalizedExerciseId
+    );
+    if (!exercise || !Array.isArray(exercise.sets) || !exercise.sets.length) {
+      continue;
     }
+
+    return { workout, exercise };
   }
-  return 0;
+
+  return null;
 }
 
 function hasValidWorkoutData(workouts, exerciseId) {
@@ -1884,6 +1969,114 @@ function hasValidWorkoutData(workouts, exerciseId) {
     }
   }
   return false;
+}
+
+function getLatestExerciseReference(
+  workouts,
+  exerciseId,
+  { excludeWorkoutId = null } = {}
+) {
+  const source = getLatestExerciseSource(workouts, exerciseId, { excludeWorkoutId });
+  if (!source) {
+    return null;
+  }
+
+  const { workout, exercise } = source;
+  const previousSummary = summarizeExerciseSets(exercise.sets);
+  const projectedSets = exercise.sets.map((set) => ({
+    ...set,
+    reps: Math.max(1, (Number(set.reps) || 0) + 1),
+  }));
+  const projectedSummary = summarizeExerciseSets(projectedSets);
+  const progressionParts = summarizeExerciseReferenceProgression(exercise.sets);
+  const maxWeight = Math.max(0, ...exercise.sets.map((set) => Number(set.weight) || 0));
+
+  return {
+    workoutId: Number.isFinite(Number(workout?.id)) ? Number(workout.id) : null,
+    workoutDate: typeof workout?.workout_date === "string" ? workout.workout_date : "",
+    exerciseName: typeof exercise.name === "string" ? exercise.name : "",
+    previousSummary,
+    projectedSummary,
+    progressionParts,
+    maxWeight,
+  };
+}
+
+function summarizeExerciseReferenceProgression(sets) {
+  if (!Array.isArray(sets) || !sets.length) {
+    return [];
+  }
+
+  const grouped = [];
+  let current = null;
+
+  sets.forEach((set) => {
+    const weight = Number(set.weight) || 0;
+    const reps = Number(set.reps) || 0;
+
+    if (current && current.weight === weight) {
+      current.reps.push(reps);
+      return;
+    }
+
+    if (current) {
+      grouped.push(current);
+    }
+
+    current = {
+      weight,
+      reps: [reps],
+    };
+  });
+
+  if (current) {
+    grouped.push(current);
+  }
+
+  return grouped.map((group) => ({
+    previousLabel: `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`,
+    nextLabel: summarizeRepRuns(group.reps.map((reps) => Math.max(1, Number(reps) + 1))),
+  }));
+}
+
+function getPlannedSetForExercise(
+  workouts,
+  exerciseId,
+  draftSetIndex = 0,
+  { excludeWorkoutId = null } = {}
+) {
+  const normalizedIndex = Math.max(0, Number(draftSetIndex) || 0);
+  const source = getLatestExerciseSource(workouts, exerciseId, { excludeWorkoutId });
+  if (!source) {
+    return {
+      reps: 12,
+      weight: getWeightFromLastWorkout(workouts, exerciseId),
+      notes: null,
+    };
+  }
+
+  const sourceSets = source.exercise.sets
+    .map((set) => ({
+      reps: Math.max(1, Number(set.reps) || 0),
+      weight: Number(set.weight) || 0,
+      notes: set.notes ?? null,
+    }))
+    .filter((set) => set.reps > 0);
+
+  if (!sourceSets.length) {
+    return {
+      reps: 12,
+      weight: getWeightFromLastWorkout(workouts, exerciseId),
+      notes: null,
+    };
+  }
+
+  const templateSet = sourceSets[Math.min(normalizedIndex, sourceSets.length - 1)];
+  return {
+    reps: Math.max(1, templateSet.reps + 1),
+    weight: templateSet.weight,
+    notes: null,
+  };
 }
 
 function groupConsecutiveExerciseSets(sets) {
@@ -3085,6 +3278,10 @@ function installTestApi() {
     openDraftExerciseActionSheet(exerciseId) {
       return openDraftCardActionMenu(exerciseId);
     },
+    openDraftExerciseEditor(exerciseId) {
+      selectExercise(Number(exerciseId));
+      return true;
+    },
     getBodyWeightEntries() {
       return state.bodyWeightEntries.map((entry) => ({ ...entry }));
     },
@@ -3363,13 +3560,7 @@ function renderNextPlanExerciseRow(exercise) {
       <div class="next-plan-row-inline">
         <span class="next-plan-row-name">${escapeHtml(exercise.name)}</span>
         <span class="next-plan-row-summary">
-          ${compactSets.parts
-            .map(
-              (part) => `
-                <span class="next-plan-row-part">${escapeHtml(part)}</span>
-              `
-            )
-            .join("")}
+          ${renderCompactSummaryParts(compactSets.parts, "next-plan-row-part")}
         </span>
       </div>
     </article>
@@ -3458,13 +3649,7 @@ function renderLoggedExerciseCard(exercise) {
       <div class="workout-exercise-inline">
         <span class="workout-exercise-name">${escapeHtml(exercise.name)}</span>
         <span class="workout-set-summary-inline">
-          ${compactSets.parts
-            .map(
-              (part) => `
-                <span class="workout-set-summary-part">${escapeHtml(part)}</span>
-              `
-            )
-            .join("")}
+          ${renderCompactSummaryParts(compactSets.parts, "workout-set-summary-part")}
         </span>
       </div>
       ${
@@ -3530,6 +3715,30 @@ function summarizeExerciseSets(sets) {
       .filter(Boolean),
     segments,
   };
+}
+
+function renderCompactSummaryParts(parts, partClassName) {
+  return (Array.isArray(parts) ? parts : [])
+    .map(
+      (part) => `
+        <span class="${partClassName}">${escapeHtml(part)}</span>
+      `
+    )
+    .join("");
+}
+
+function renderReferenceProgressionParts(parts) {
+  return (Array.isArray(parts) ? parts : [])
+    .map(
+      (part) => `
+        <span class="exercise-reference-part">
+          <span class="exercise-reference-prev">${escapeHtml(part.previousLabel)}</span>
+          <span class="exercise-reference-arrow" aria-hidden="true">→</span>
+          <span class="exercise-reference-next">${escapeHtml(part.nextLabel)}</span>
+        </span>
+      `
+    )
+    .join("");
 }
 
 function summarizeRepRuns(reps) {
@@ -4080,6 +4289,7 @@ function getRangeDescription(rangeKey) {
 
 function renderNewWorkoutScreen() {
   const availableExercises = getAvailableExercises();
+  const draftExerciseCards = getDraftExerciseDisplayCards(getAllWorkouts());
   const nextWorkoutPlan = getNextWorkoutPlanSuggestion(getAllWorkouts());
   const shouldShowPlanSuggestion =
     !state.editingWorkoutId &&
@@ -4095,18 +4305,19 @@ function renderNewWorkoutScreen() {
           : ""
       }
 
-      ${state.workoutExercises
+      ${draftExerciseCards
         .map((exercise) =>
           renderDraftExerciseCard(exercise, {
             isSelected: exercise.exerciseId === state.selectedExerciseId,
             canUseStandard: hasValidWorkoutData(getAllWorkouts(), exercise.exerciseId),
+            isPreview: Boolean(exercise.isPreview),
           })
         )
         .join("")}
 
       ${
         availableExercises.length && !shouldShowPlanSuggestion
-          ? renderExercisePicker(availableExercises)
+          ? renderExercisePicker(availableExercises, { hidePrimaryGrid: draftExerciseCards.length > 0 })
           : ""
       }
 
@@ -4138,13 +4349,19 @@ function renderNewWorkoutPlanSuggestionCard(plan) {
   `;
 }
 
-function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard = false } = {}) {
+function renderDraftExerciseCard(
+  exercise,
+  { isSelected = false, canUseStandard = false, isPreview = false } = {}
+) {
+  const lastReference = getLatestExerciseReference(getAllWorkouts(), exercise.exerciseId, {
+    excludeWorkoutId: state.editingWorkoutId,
+  });
   return `
     <section class="draft-exercise-card-shell">
       <article
         class="surface-card exercise-card workout-card-surface ${isSelected ? "exercise-card-active" : ""}"
         data-draft-exercise-id="${exercise.exerciseId}"
-        data-draft-card-longpress
+        ${!isPreview ? "data-draft-card-longpress" : ""}
       >
         <md-ripple class="draft-exercise-material-ripple"></md-ripple>
         <div class="draft-exercise-layout">
@@ -4158,6 +4375,15 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
               </div>
             </div>
             ${
+              lastReference
+                ? `
+                  <div class="draft-exercise-reference-line">
+                    ${renderReferenceProgressionParts(lastReference.progressionParts)}
+                  </div>
+                `
+                : ""
+            }
+            ${
               exercise.sets.length
                 ? `
                   ${(() => {
@@ -4165,24 +4391,21 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
                     const latestSetIndex = Math.max(0, exercise.sets.length - 1);
                     return `
                   <div class="set-list draft-set-summary-list">
-                    ${compactSets.segments
-                      .map(
-                        (segment) => `
-                          <div class="set-row set-row-editable set-row-summary">
-                            <button
-                              class="set-row-main draft-set-summary-button"
-                              data-action="edit-draft-set"
-                              data-exercise-id="${exercise.exerciseId}"
-                              data-set-index="${latestSetIndex}"
-                            >
-                              <span class="set-row-value draft-set-summary-value">${escapeHtml(
-                                segment.label
-                              )}</span>
-                            </button>
-                          </div>
-                        `
-                      )
-                      .join("")}
+                    <div class="set-row set-row-editable set-row-summary draft-set-summary-row">
+                      <button
+                        class="set-row-main draft-set-summary-button"
+                        data-action="edit-draft-set"
+                        data-exercise-id="${exercise.exerciseId}"
+                        data-set-index="${latestSetIndex}"
+                      >
+                        <span class="set-row-value draft-set-summary-value draft-set-summary-inline">
+                          ${renderCompactSummaryParts(
+                            compactSets.parts,
+                            "draft-set-summary-part"
+                          )}
+                        </span>
+                      </button>
+                    </div>
                   </div>
                   ${
                     compactSets.notes.length
@@ -4194,7 +4417,11 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
                     `;
                   })()}
                 `
-                : `<div class="exercise-empty">Добавь первый сет, потом можно будет чередовать это упражнение с другими.</div>`
+                : isPreview
+                  ? ""
+                  : lastReference
+                  ? ""
+                  : `<div class="exercise-empty">Добавь первый сет, потом можно будет чередовать это упражнение с другими.</div>`
             }
           </div>
           <button
@@ -4202,11 +4429,11 @@ function renderDraftExerciseCard(exercise, { isSelected = false, canUseStandard 
             data-action="quick-standard-set"
             data-longpress-action="continue-exercise"
             data-exercise-id="${exercise.exerciseId}"
-            aria-label="Добавить стандартный сет. Удержание откроет ручной ввод."
-            title="Тап: стандартный сет · удержание: свой сет"
+            aria-label="Добавить сет по плану. Удержание откроет ручной ввод."
+            title="Тап: сет по плану · удержание: свой сет"
           >
             ${iconMarkup("draft-add-set")}
-            <span class="sr-only">Добавить стандартный сет. Удержание откроет ручной ввод.</span>
+            <span class="sr-only">Добавить сет по плану. Удержание откроет ручной ввод.</span>
           </button>
         </div>
       </article>
@@ -4243,7 +4470,7 @@ function renderCurrentExerciseCard(exerciseName) {
   `;
 }
 
-function renderExercisePicker(exercises) {
+function renderExercisePicker(exercises, { hidePrimaryGrid = false } = {}) {
   const {
     primary: primaryExercises,
     secondary: secondaryExercises,
@@ -4252,17 +4479,22 @@ function renderExercisePicker(exercises) {
     getExercisePickerGroups(exercises);
   const shouldShowMoreToggle = secondaryExercises.length > 0;
   const shouldShowSecondary = state.showAllExerciseOptions && shouldShowMoreToggle;
+  const shouldShowCompletionState = primaryPoolExhausted;
+
+  if (hidePrimaryGrid && !shouldShowCompletionState && !shouldShowMoreToggle && !shouldShowSecondary) {
+    return "";
+  }
 
   return `
     <section class="card exercise-picker">
       ${
-        primaryExercises.length
+        !hidePrimaryGrid && primaryExercises.length
           ? `
             <div class="exercise-picker-group">
               ${renderExerciseTileGrid(primaryExercises)}
             </div>
           `
-          : primaryPoolExhausted
+          : shouldShowCompletionState
             ? `
               <div class="exercise-picker-complete">
                 <div class="exercise-picker-complete-title">Круто, тренировка закончена</div>
@@ -4283,9 +4515,11 @@ function renderExercisePicker(exercises) {
                 }
               </div>
             `
-          : exercises.length
+          : !hidePrimaryGrid && exercises.length
             ? renderExerciseTileGrid(exercises)
-            : `<p class="muted-note exercise-picker-empty-note">В локальной базе не осталось свободных упражнений.</p>`
+            : hidePrimaryGrid
+              ? ""
+              : `<p class="muted-note exercise-picker-empty-note">В локальной базе не осталось свободных упражнений.</p>`
       }
       ${
         shouldShowMoreToggle && !primaryPoolExhausted
@@ -4344,11 +4578,39 @@ function renderSetModal() {
   const isEditingExistingSet = Boolean(
     state.activeSetEditor && Number.isInteger(state.activeSetEditor.setIndex)
   );
+  const exerciseId = Number(
+    state.activeSetEditor?.exerciseId ?? state.selectedExerciseId ?? 0
+  );
+  const exerciseDefinition = getExerciseDefinition(exerciseId);
+  const exerciseTitle =
+    exerciseDefinition?.name ||
+    state.workoutExercises.find((exercise) => exercise.exerciseId === exerciseId)?.exerciseName ||
+    "";
+  const lastReference = getLatestExerciseReference(getAllWorkouts(), exerciseId, {
+    excludeWorkoutId: state.editingWorkoutId,
+  });
   return `
     <div class="modal-overlay" data-action="dismiss-set-modal">
       <section class="modal-card">
         <div class="stack">
           <div class="modal-heading">${isEditingExistingSet ? "Редактировать сет" : "Новый сет"}</div>
+          ${
+            lastReference && exerciseTitle
+              ? `
+                <section class="draft-set-reference-card">
+                  <div class="exercise-title-row draft-set-reference-title-row">
+                    <div class="exercise-name">${escapeHtml(exerciseTitle)}</div>
+                    <span class="draft-exercise-icon-slot" aria-hidden="true">
+                      ${exerciseIconMarkup(exerciseTitle)}
+                    </span>
+                  </div>
+                  <div class="draft-set-reference-line">
+                    ${renderReferenceProgressionParts(lastReference.progressionParts)}
+                  </div>
+                </section>
+              `
+              : ""
+          }
           <div>
             <div class="modal-section-title">Вес</div>
             <div class="value-stepper">

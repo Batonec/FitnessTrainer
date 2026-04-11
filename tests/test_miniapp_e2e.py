@@ -150,7 +150,18 @@ class MiniAppE2ETest(unittest.TestCase):
         if target.count() == 0 and self.page.locator('[data-action="toggle-more-exercises"]').count():
             self.page.locator('[data-action="toggle-more-exercises"]').click()
         target = self.page.locator('[data-action="select-exercise"]').filter(has_text=name)
-        target.click()
+        if target.count():
+            target.click()
+            return
+
+        card = self.page.locator(".exercise-card").filter(has_text=name).first
+        expect(card).to_have_count(1)
+        exercise_id = card.get_attribute("data-draft-exercise-id")
+        self.assertIsNotNone(exercise_id)
+        self.page.evaluate(
+            "(exerciseId) => window.__trainerMiniAppTestApi.openDraftExerciseEditor(exerciseId)",
+            exercise_id,
+        )
 
     def reveal_workout_actions(self, card_locator, *, vertical_shift: float = 0) -> None:
         surface = card_locator.locator('[data-workout-swipe-surface]').first
@@ -271,6 +282,30 @@ class MiniAppE2ETest(unittest.TestCase):
                 weight=weight,
                 reps=reps,
             ),
+        )
+        return response.payload["workout"]
+
+    def seed_multi_exercise_workout(
+        self,
+        *,
+        client_id: str,
+        workout_date: str,
+        exercises: list[dict],
+    ) -> dict:
+        client = self.telegram_seed_client()
+        response = client.request_json(
+            "POST",
+            "/api/workouts",
+            {
+                "client_id": client_id,
+                "workout_date": workout_date,
+                "plan_id": None,
+                "data": {
+                    "notes": None,
+                    "load_type": "medium",
+                    "exercises": exercises,
+                },
+            },
         )
         return response.payload["workout"]
 
@@ -490,16 +525,14 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_new_workout()
 
         expect(self.page.locator(".plan-start-banner")).to_have_count(0)
-        expect(self.page.locator(".exercise-card")).to_have_count(0)
-        expect(self.page.locator(".exercise-picker")).to_be_visible()
-        self.assertGreater(self.page.locator('[data-action="select-exercise"]').count(), 0)
+        expect(self.page.locator(".exercise-card").first).to_be_visible()
+        expect(self.page.locator('[data-action="toggle-more-exercises"]')).to_have_count(1)
 
     def test_exercise_picker_prioritizes_main_history_block_and_hides_rest_under_more(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
         self.open_new_workout()
 
-        picker = self.page.locator(".exercise-picker")
         for exercise_name in [
             "Жим ногами",
             "Тяга верт.",
@@ -508,33 +541,29 @@ class MiniAppE2ETest(unittest.TestCase):
             "Трицепс",
             "Бабочка",
         ]:
-            expect(picker).to_contain_text(exercise_name)
+            expect(self.page.locator(".exercise-card").filter(has_text=exercise_name)).to_have_count(1)
 
-        expect(picker).not_to_contain_text("Жим гор.")
-        expect(picker).not_to_contain_text("Жим в тренажере")
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим гор.")).to_have_count(0)
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим в тренажере")).to_have_count(0)
         self.page.locator('[data-action="toggle-more-exercises"]').click()
-        expect(picker).to_contain_text("Скрыть редкие упражнения")
+        expect(self.page.locator('[data-action="toggle-more-exercises"]')).to_have_text("Скрыть редкие упражнения")
         expect(self.page.locator(".exercise-picker-group-secondary .exercise-picker-group-title")).to_have_text("Все упражнения")
-        expect(picker).to_contain_text("Жим гор.")
-        expect(picker).to_contain_text("Жим в тренажере")
+        expect(self.page.locator(".exercise-picker-group-secondary")).to_contain_text("Жим гор.")
+        expect(self.page.locator(".exercise-picker-group-secondary")).to_contain_text("Жим в тренажере")
 
     def test_exercise_picker_returns_empty_selection_back_to_picker_on_cancel(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
         self.open_new_workout()
 
-        picker = self.page.locator(".exercise-picker")
-        leg_press_tile = picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
-        expect(leg_press_tile).to_have_count(1)
-
-        leg_press_tile.click()
+        self.select_exercise_by_name("Жим ногами")
         self.page.locator('[data-action="set-cancel"]').click()
 
-        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_have_count(0)
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(1)
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Трицепс")).to_have_count(1)
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим гор.")).to_have_count(0)
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Бабочка")).to_have_count(1)
+        leg_press_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(leg_press_card).to_have_count(1)
+        expect(leg_press_card.locator(".set-row")).to_have_count(0)
+        expect(self.page.locator(".exercise-card").filter(has_text="Трицепс")).to_have_count(1)
+        expect(self.page.locator(".exercise-card").filter(has_text="Бабочка")).to_have_count(1)
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
@@ -543,29 +572,26 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
         self.open_new_workout()
 
-        picker = self.page.locator(".exercise-picker")
-        picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        self.select_exercise_by_name("Жим ногами")
         expect(self.page.locator(".modal-card")).to_be_visible()
 
         self.page.locator(".modal-overlay").click(position={"x": 16, "y": 16})
 
         expect(self.page.locator(".modal-card")).to_have_count(0)
-        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_have_count(0)
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(1)
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_have_count(1)
+        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(".set-row")).to_have_count(0)
 
-    def test_exercise_picker_hides_primary_exercise_after_first_set_is_added(self) -> None:
+    def test_primary_preview_card_turns_into_real_draft_after_first_set(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
         self.open_new_workout()
 
-        picker = self.page.locator(".exercise-picker")
-        leg_press_tile = picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
-
-        leg_press_tile.click()
+        self.select_exercise_by_name("Жим ногами")
         self.add_default_set()
 
-        expect(self.page.locator(".exercise-card").filter(has_text="Жим ногами")).to_be_visible()
-        expect(picker.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")).to_have_count(0)
+        leg_press_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(leg_press_card).to_be_visible()
+        expect(leg_press_card.locator(".set-row")).to_have_count(1)
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(1)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(1)
 
@@ -574,7 +600,7 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
         self.open_new_workout()
 
-        self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами").click()
+        self.select_exercise_by_name("Жим ногами")
         self.add_default_set()
 
         card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
@@ -595,7 +621,7 @@ class MiniAppE2ETest(unittest.TestCase):
             "data-action", "quick-standard-set"
         )
         expect(card.locator(".draft-primary-add-button")).to_have_attribute(
-            "title", "Тап: стандартный сет · удержание: свой сет"
+            "title", "Тап: сет по плану · удержание: свой сет"
         )
         expect(card.locator(".draft-primary-add-button svg")).to_have_count(1)
         expect(card.locator('[data-action="remove-last-draft-set"]')).to_have_count(0)
@@ -604,6 +630,75 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator('.draft-card-action-sheet [data-action="remove-last-draft-set"]')).to_have_attribute("data-exercise-id", "8")
         expect(self.page.locator('.draft-card-action-sheet [data-action="remove-draft-exercise"]')).to_have_attribute("data-exercise-id", "8")
         expect(card.locator(".set-row-remove-button")).to_have_count(0)
+
+    def test_draft_exercise_card_shows_compact_progression_reference_line(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="draft-reference-summary",
+            workout_date="2026-03-28",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80},
+                        {"reps": 15, "weight": 80},
+                        {"reps": 15, "weight": 80},
+                    ],
+                }
+            ],
+        )
+
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        reference = card.locator(".draft-exercise-reference-line")
+        expect(reference).to_contain_text("80кг ×15×3")
+        expect(reference).to_contain_text("→")
+        expect(reference).to_contain_text("16×3")
+        self.assertEqual(
+            self.page.evaluate(
+                "() => getComputedStyle(document.querySelector('.draft-exercise-reference-line')).flexWrap"
+            ),
+            "nowrap",
+        )
+
+    def test_set_modal_shows_last_workout_reference_and_plus_one_target(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="draft-reference-modal",
+            workout_date="2026-03-30",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80},
+                        {"reps": 15, "weight": 80},
+                        {"reps": 15, "weight": 80},
+                    ],
+                }
+            ],
+        )
+
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+
+        reference = self.page.locator(".draft-set-reference-card")
+        expect(reference.locator(".draft-set-reference-title-row")).to_contain_text("Жим ногами")
+        expect(reference.locator(".draft-set-reference-line")).to_contain_text("80кг ×15×3")
+        expect(reference.locator(".draft-set-reference-line")).to_contain_text("→")
+        expect(reference.locator(".draft-set-reference-line")).to_contain_text("16×3")
+        self.assertEqual(
+            self.page.evaluate(
+                "() => getComputedStyle(document.querySelector('.draft-set-reference-line')).flexWrap"
+            ),
+            "nowrap",
+        )
 
     def test_draft_exercise_card_can_remove_last_set_from_header_action(self) -> None:
         self.open_app()
@@ -624,6 +719,59 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(card.locator(".set-row")).to_have_count(1)
         expect(card.locator(".draft-set-summary-value")).not_to_contain_text("×2")
 
+    def test_quick_add_uses_next_planned_set_values_from_last_workout(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="draft-quick-plan-seed",
+            workout_date="2026-03-30",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80},
+                        {"reps": 13, "weight": 90},
+                        {"reps": 12, "weight": 90},
+                    ],
+                }
+            ],
+        )
+
+        self.open_app()
+        self.open_new_workout()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        card.locator(".draft-primary-add-button").click()
+
+        expect(card.locator(".draft-set-summary-value")).to_have_text("80кг ×16")
+
+    def test_quick_add_advances_through_planned_set_sequence(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="draft-quick-plan-sequence",
+            workout_date="2026-03-31",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80},
+                        {"reps": 13, "weight": 90},
+                        {"reps": 12, "weight": 90},
+                    ],
+                }
+            ],
+        )
+
+        self.open_app()
+        self.open_new_workout()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        card.locator(".draft-primary-add-button").click()
+        card.locator(".draft-primary-add-button").click()
+        card.locator(".draft-primary-add-button").click()
+
+        expect(card.locator(".draft-set-summary-value")).to_contain_text("80кг ×16")
+        expect(card.locator(".draft-set-summary-value")).to_contain_text("90кг ×14, 13")
+
     def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
@@ -637,7 +785,7 @@ class MiniAppE2ETest(unittest.TestCase):
             "Трицепс",
             "Бабочка",
         ]:
-            self.page.locator('[data-action="select-exercise"]').filter(has_text=exercise_name).click()
+            self.select_exercise_by_name(exercise_name)
             self.add_default_set()
 
         picker = self.page.locator(".exercise-picker")
@@ -661,11 +809,11 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_new_workout()
 
         for exercise_name in ["Жим ногами", "Тяга верт.", "Дельты", "Бицепс"]:
-            self.page.locator('[data-action="select-exercise"]').filter(has_text=exercise_name).click()
+            self.select_exercise_by_name(exercise_name)
             self.add_default_set()
             self.page.wait_for_timeout(150)
 
-        self.page.locator('[data-action="select-exercise"]').filter(has_text="Трицепс").click()
+        self.select_exercise_by_name("Трицепс")
         self.add_default_set()
         self.page.wait_for_timeout(500)
 
@@ -696,7 +844,10 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
         self.page.locator('[data-action="set-cancel"]').click()
-        expect(self.page.locator(".exercise-card")).to_have_count(0)
+        expect(self.page.locator(".exercise-card")).to_have_count(6)
+        expect(
+            self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(".set-row")
+        ).to_have_count(0)
         expect(self.page.locator('[data-action="finish-workout"]')).to_have_count(0)
         expect(self.page.locator('[data-action="reset-workout-draft"]')).to_have_count(0)
 
@@ -870,11 +1021,8 @@ class MiniAppE2ETest(unittest.TestCase):
         self.respond_to_next_dialog(accept=True, contains="Сбросить текущий черновик")
         self.page.locator('[data-action="reset-workout-draft"]').first.click()
 
-        expect(self.page.locator(".exercise-card")).to_have_count(0)
+        expect(self.page.locator(".exercise-card")).to_have_count(6)
         expect(self.page.locator(".exercise-picker")).to_be_visible()
-        expect(
-            self.page.locator('[data-action="select-exercise"]').filter(has_text="Жим ногами")
-        ).to_be_visible()
         expect(
             self.page.locator('[data-action="toggle-more-exercises"]')
         ).to_be_visible()
@@ -1039,6 +1187,16 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(first_set.locator(".draft-set-summary-value")).to_contain_text("кг ×")
         expect(first_set.locator(".set-row-index")).to_have_count(0)
         expect(first_set).not_to_contain_text("Сет 1")
+        self.assertEqual(
+            self.page.evaluate(
+                """
+                () => getComputedStyle(
+                  document.querySelector('.draft-set-summary-value')
+                ).flexWrap
+                """
+            ),
+            "nowrap",
+        )
 
         self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
             ".draft-primary-add-button"
@@ -1065,8 +1223,8 @@ class MiniAppE2ETest(unittest.TestCase):
         self.assertIsNotNone(button_box)
         self.assertLess(button_box["width"], card_box["width"] - 40)
 
-        before_text = summary_value.text_content()
-        match = re.search(r"^([0-9]+(?:,[0-9]+)?)кг ×([0-9]+)×2$", before_text or "")
+        before_text = re.sub(r"\s+", " ", summary_value.text_content() or "").strip()
+        match = re.search(r"^([0-9]+(?:,[0-9]+)?)кг ×([0-9]+)", before_text)
         self.assertIsNotNone(match)
         weight_text = match.group(1)
         reps_value = int(match.group(2))
@@ -1151,7 +1309,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator("#progress-exercise")).to_have_value("16")
         expect(self.page.locator(".progress-panel")).to_contain_text("Разгибания ног")
         expect(self.page.locator(".progress-summary-grid")).to_contain_text("Изменение")
-        expect(self.page.locator(".progress-summary-grid")).to_contain_text("+30 кг / +4 повт.")
+        expect(self.page.locator(".progress-summary-grid")).to_contain_text("+10 кг / +2 повт.")
         expect(self.page.locator(".progress-chart")).to_be_visible()
 
     def test_topbar_shows_current_user_id_badge(self) -> None:

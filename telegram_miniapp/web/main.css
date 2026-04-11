@@ -470,7 +470,16 @@ button {
 }
 
 .draft-set-summary-list {
+  display: block;
   gap: 6px;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.draft-set-summary-row {
+  justify-content: flex-start;
+  gap: 0;
+  min-width: 0;
 }
 
 .set-row {
@@ -1118,6 +1127,55 @@ button {
   gap: 10px;
 }
 
+.draft-exercise-reference-line,
+.draft-set-reference-line {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.draft-exercise-reference-line::-webkit-scrollbar,
+.draft-set-reference-line::-webkit-scrollbar {
+  display: none;
+}
+
+.exercise-reference-part {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: max-content;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.exercise-reference-prev,
+.exercise-reference-next {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.exercise-reference-prev {
+  color: #7b8089;
+}
+
+.exercise-reference-arrow {
+  color: #adb2bb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.exercise-reference-next {
+  color: #71a06a;
+}
+
 .draft-primary-add-button {
   position: relative;
   display: inline-flex;
@@ -1335,18 +1393,40 @@ button {
 }
 
 .draft-set-summary-button {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   width: auto;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
   max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
+.draft-set-summary-inline {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 6px 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.draft-set-summary-inline::-webkit-scrollbar {
+  display: none;
+}
+
+.draft-set-summary-part,
 .draft-set-summary-value {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .section-title {
@@ -1764,6 +1844,23 @@ button {
   border-radius: 24px;
   background: white;
   box-shadow: 0 28px 80px rgba(17, 24, 39, 0.16);
+}
+
+.draft-set-reference-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(242, 245, 255, 0.96), rgba(248, 250, 255, 0.96));
+  border: 1px solid rgba(124, 142, 223, 0.16);
+}
+
+.draft-set-reference-title-row .exercise-name {
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .draft-card-menu-overlay {
