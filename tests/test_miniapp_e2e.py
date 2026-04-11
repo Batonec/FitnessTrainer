@@ -517,6 +517,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator(".next-plan-card")).to_have_count(0)
         expect(self.page.locator(".workout-card").filter(has_text="Жим ногами")).to_be_visible()
         expect(self.page.locator(".workout-card").filter(has_text="Тяга верт.")).to_be_visible()
+        expect(self.page.locator(".workout-card .load-badge")).to_have_count(0)
 
     def test_new_workout_does_not_prefill_from_next_workout_plan_when_feature_disabled(self) -> None:
         self.seed_next_workout_plan_source()
@@ -546,8 +547,8 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator(".exercise-card").filter(has_text="Жим гор.")).to_have_count(0)
         expect(self.page.locator(".exercise-card").filter(has_text="Жим в тренажере")).to_have_count(0)
         self.page.locator('[data-action="toggle-more-exercises"]').click()
-        expect(self.page.locator('[data-action="toggle-more-exercises"]')).to_have_text("Скрыть редкие упражнения")
-        expect(self.page.locator(".exercise-picker-group-secondary .exercise-picker-group-title")).to_have_text("Все упражнения")
+        expect(self.page.locator('[data-action="toggle-more-exercises"]')).to_have_text("Скрыть")
+        expect(self.page.locator(".exercise-picker-group-secondary .exercise-picker-group-title")).to_have_count(0)
         expect(self.page.locator(".exercise-picker-group-secondary")).to_contain_text("Жим гор.")
         expect(self.page.locator(".exercise-picker-group-secondary")).to_contain_text("Жим в тренажере")
 
@@ -695,6 +696,8 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(reference.locator(".draft-set-reference-line")).to_contain_text("80кг ×15×3")
         expect(reference.locator(".draft-set-reference-line")).to_contain_text("→")
         expect(reference.locator(".draft-set-reference-line")).to_contain_text("16×3")
+        expect(self.page.locator(".value-display-number").first).to_have_text("80")
+        expect(self.page.locator(".value-display-number").nth(1)).to_have_text("16")
         expect(self.page.locator(".value-display-compact").first).to_contain_text("кг")
         expect(self.page.locator(".value-display-compact").nth(1)).to_contain_text("ПТ")
         expect(self.page.locator(".set-stepper-button svg")).to_have_count(4)
@@ -798,6 +801,35 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(card.locator(".draft-set-summary-value")).to_contain_text("80кг ×16")
         expect(card.locator(".draft-set-summary-value")).to_contain_text("90кг ×14, 13")
 
+    def test_set_modal_uses_same_planned_sequence_as_quick_add(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="draft-plan-shared-sequence",
+            workout_date="2026-04-01",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80},
+                        {"reps": 13, "weight": 90},
+                        {"reps": 12, "weight": 90},
+                    ],
+                }
+            ],
+        )
+
+        self.open_app()
+        self.open_new_workout()
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        card.locator(".draft-primary-add-button").click()
+        expect(card.locator(".draft-set-summary-value")).to_have_text("80кг ×16")
+
+        self.select_exercise_by_name("Жим ногами")
+
+        expect(self.page.locator(".value-display-number").first).to_have_text("90")
+        expect(self.page.locator(".value-display-number").nth(1)).to_have_text("14")
+
     def test_exercise_picker_shows_completion_message_when_primary_tiles_are_exhausted(self) -> None:
         self.seed_popular_exercise_picker_history()
         self.open_app()
@@ -824,7 +856,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(picker).not_to_contain_text("Жим в тренажере")
 
         self.page.locator('[data-action="toggle-more-exercises"]').click()
-        expect(picker).to_contain_text("Скрыть редкие упражнения")
+        expect(picker).to_contain_text("Скрыть")
         expect(picker).to_contain_text("Жим гор.")
         expect(picker).to_contain_text("Жим в тренажере")
 
@@ -1145,6 +1177,56 @@ class MiniAppE2ETest(unittest.TestCase):
 
         self.assertAlmostEqual(logical_ratio, 1 / 6, delta=0.02)
         self.assertAlmostEqual(visible_ratio, logical_ratio, delta=0.02)
+
+    def test_workout_progress_ring_counts_partial_progress_within_multi_set_plan(self) -> None:
+        self.seed_popular_exercise_picker_history()
+        self.seed_multi_exercise_workout(
+            client_id="progress-fractional-plan",
+            workout_date="2026-04-01",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80},
+                        {"reps": 13, "weight": 90},
+                        {"reps": 12, "weight": 90},
+                    ],
+                }
+            ],
+        )
+
+        self.open_app()
+        self.open_new_workout()
+
+        self.select_exercise_by_name("Жим ногами")
+        self.add_default_set()
+        self.page.wait_for_function(
+            "() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > 0"
+        )
+        first_ratio = self.page.evaluate(
+            "window.__trainerMiniAppTestApi.getTargetFabProgressRatio()"
+        )
+        self.assertAlmostEqual(first_ratio, 1 / 18, delta=0.02)
+
+        card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        card.locator(".draft-primary-add-button").click()
+        self.page.wait_for_function(
+            f"() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > {first_ratio + 0.01}"
+        )
+        second_ratio = self.page.evaluate(
+            "window.__trainerMiniAppTestApi.getTargetFabProgressRatio()"
+        )
+        self.assertAlmostEqual(second_ratio, 2 / 18, delta=0.02)
+
+        card.locator(".draft-primary-add-button").click()
+        self.page.wait_for_function(
+            f"() => window.__trainerMiniAppTestApi.getTargetFabProgressRatio() > {second_ratio + 0.01}"
+        )
+        third_ratio = self.page.evaluate(
+            "window.__trainerMiniAppTestApi.getTargetFabProgressRatio()"
+        )
+        self.assertAlmostEqual(third_ratio, 3 / 18, delta=0.02)
 
     def test_workout_progress_ring_recedes_by_one_step_when_exercise_is_removed(self) -> None:
         self.seed_popular_exercise_picker_history()

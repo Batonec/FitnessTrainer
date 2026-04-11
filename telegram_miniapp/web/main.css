@@ -1752,7 +1752,12 @@ button {
   align-items: center;
   justify-content: center;
   margin-inline: auto;
+  min-height: 32px;
+  padding: 4px 12px;
+  line-height: 1;
   text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .exercise-tile-grid {
@@ -1826,6 +1831,7 @@ button {
   align-items: center;
   justify-content: center;
   font-size: 13px;
+  line-height: 1;
 }
 
 .exercise-picker-empty-note {

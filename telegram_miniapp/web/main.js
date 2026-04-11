@@ -1046,9 +1046,38 @@ function getWorkoutDraftProgress() {
   const catalog = Array.isArray(state.exercises) && state.exercises.length
     ? state.exercises
     : getAvailableExercises();
-  const { primaryPoolTotal, completedPrimaryCount } = getExercisePickerGroups(catalog, getAllWorkouts());
+  const { primaryPoolTotal, primaryPoolIds } = getExercisePickerGroups(catalog, getAllWorkouts());
+  const actualDraftExerciseById = new Map(
+    (Array.isArray(state.workoutExercises) ? state.workoutExercises : []).map((exercise) => [
+      Number(exercise.exerciseId),
+      exercise,
+    ])
+  );
+  const accumulatedProgress = Array.isArray(primaryPoolIds)
+    ? primaryPoolIds.reduce((total, exerciseId) => {
+      const normalizedExerciseId = Number(exerciseId);
+      if (!Number.isFinite(normalizedExerciseId) || normalizedExerciseId <= 0) {
+        return total;
+      }
+
+      const planningContext = getExercisePlanningContext(getAllWorkouts(), normalizedExerciseId, {
+        excludeWorkoutId: state.editingWorkoutId,
+      });
+      const targetSetCount = Math.max(
+        1,
+        Array.isArray(planningContext?.plannedSets) ? planningContext.plannedSets.length : 0
+      );
+      const actualSetCount = Math.max(
+        0,
+        Array.isArray(actualDraftExerciseById.get(normalizedExerciseId)?.sets)
+          ? actualDraftExerciseById.get(normalizedExerciseId).sets.length
+          : 0
+      );
+      return total + Math.min(actualSetCount, targetSetCount) / targetSetCount;
+    }, 0)
+    : 0;
   const ratio = primaryPoolTotal > 0
-    ? Math.max(0, Math.min(1, completedPrimaryCount / primaryPoolTotal))
+    ? Math.max(0, Math.min(1, accumulatedProgress / primaryPoolTotal))
     : 0;
   const hue = Math.round(10 + ratio * 122);
 
@@ -1069,6 +1098,7 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
       primaryPoolExhausted: false,
       primaryPoolTotal: 0,
       completedPrimaryCount: 0,
+      primaryPoolIds: [],
     };
   }
 
@@ -1179,6 +1209,7 @@ function getExercisePickerGroups(exercises, workouts = getAllWorkouts()) {
     primaryPoolExhausted: primaryPool.length > 0 && primary.length === 0 && secondary.length > 0,
     primaryPoolTotal,
     completedPrimaryCount,
+    primaryPoolIds: Array.from(primaryIds),
   };
 }
 
@@ -1281,19 +1312,13 @@ function selectExercise(exerciseId, { openSetEditor = true } = {}) {
   const isNewExercise = !state.workoutExercises.some(
     (exercise) => exercise.exerciseId === selectedExercise.id
   );
-  focusDraftExercise(selectedExercise.id);
   if (isNewExercise) {
     pendingDraftExerciseScrollId = selectedExercise.id;
   }
   if (openSetEditor) {
-    state.currentSetReps = 12;
-    state.currentSetWeight = getWeightFromLastWorkout(getAllWorkouts(), selectedExercise.id);
-    state.activeSetEditor = {
-      exerciseId: selectedExercise.id,
-      setIndex: null,
-    };
-    state.isAddingSet = true;
+    openDraftSetEditorForExercise(selectedExercise.id);
   } else {
+    focusDraftExercise(selectedExercise.id);
     state.activeSetEditor = null;
     state.isAddingSet = false;
   }
@@ -1487,10 +1512,10 @@ function startAddingSet() {
   startAddingSetForExercise(selectedExercise.id);
 }
 
-function startAddingSetForExercise(exerciseId) {
+function openDraftSetEditorForExercise(exerciseId) {
   const selectedExercise = getExerciseDefinition(Number(exerciseId));
   if (!selectedExercise) {
-    return;
+    return null;
   }
 
   const draftExercise = focusDraftExercise(selectedExercise.id);
@@ -1507,6 +1532,13 @@ function startAddingSetForExercise(exerciseId) {
     setIndex: null,
   };
   state.isAddingSet = true;
+  return draftExercise;
+}
+
+function startAddingSetForExercise(exerciseId) {
+  if (!openDraftSetEditorForExercise(exerciseId)) {
+    return;
+  }
   persistDraft();
   render();
 }
@@ -1917,10 +1949,10 @@ function inferLoadType(workoutExercises) {
 }
 
 function getWeightFromLastWorkout(workouts, exerciseId) {
-  const reference = getLatestExerciseReference(workouts, exerciseId, {
+  const planningContext = getExercisePlanningContext(workouts, exerciseId, {
     excludeWorkoutId: state.editingWorkoutId,
   });
-  return reference ? reference.maxWeight : 0;
+  return planningContext ? planningContext.maxWeight : 0;
 }
 
 function getLatestExerciseSource(
@@ -1957,6 +1989,98 @@ function getLatestExerciseSource(
   return null;
 }
 
+function buildNormalizedExerciseSets(
+  sets,
+  { incrementReps = 0, preserveNotes = true } = {}
+) {
+  return (Array.isArray(sets) ? sets : [])
+    .map((set, index) => {
+      const rawReps = Number(set?.reps) || 0;
+      const rawWeight = Number(set?.weight) || 0;
+      const rawSetIndex = Number(set?.set_index);
+      const notes =
+        preserveNotes && typeof set?.notes === "string" && set.notes.trim()
+          ? set.notes.trim()
+          : null;
+
+      return {
+        reps: Math.max(1, rawReps + incrementReps),
+        weight: Math.max(0, rawWeight),
+        notes,
+        set_index:
+          Number.isFinite(rawSetIndex) && rawSetIndex > 0 ? rawSetIndex : index + 1,
+      };
+    })
+    .filter((set) => set.reps > 0);
+}
+
+function buildExerciseReferenceProgressionParts(previousSummary, plannedSummary) {
+  const previousSegments = Array.isArray(previousSummary?.segments)
+    ? previousSummary.segments
+    : [];
+  const plannedSegments = Array.isArray(plannedSummary?.segments)
+    ? plannedSummary.segments
+    : [];
+
+  return previousSegments.map((segment, index) => {
+    const nextSegment = plannedSegments[index];
+    const nextReps =
+      Array.isArray(nextSegment?.reps) && nextSegment.reps.length
+        ? nextSegment.reps
+        : Array.isArray(segment.reps)
+          ? segment.reps.map((reps) => Math.max(1, (Number(reps) || 0) + 1))
+          : [];
+
+    return {
+      previousLabel: segment.label,
+      nextLabel: summarizeRepRuns(nextReps),
+    };
+  });
+}
+
+function getExercisePlanningContext(
+  workouts,
+  exerciseId,
+  { excludeWorkoutId = null } = {}
+) {
+  const source = getLatestExerciseSource(workouts, exerciseId, { excludeWorkoutId });
+  if (!source) {
+    return null;
+  }
+
+  const { workout, exercise } = source;
+  const previousSets = buildNormalizedExerciseSets(exercise.sets, {
+    incrementReps: 0,
+    preserveNotes: true,
+  });
+  if (!previousSets.length) {
+    return null;
+  }
+
+  const plannedSets = buildNormalizedExerciseSets(previousSets, {
+    incrementReps: 1,
+    preserveNotes: false,
+  }).map((set, index) => ({
+    ...set,
+    notes: null,
+    set_index: index + 1,
+  }));
+  const previousSummary = summarizeExerciseSets(previousSets);
+  const plannedSummary = summarizeExerciseSets(plannedSets);
+
+  return {
+    workoutId: Number.isFinite(Number(workout?.id)) ? Number(workout.id) : null,
+    workoutDate: typeof workout?.workout_date === "string" ? workout.workout_date : "",
+    exerciseName: typeof exercise.name === "string" ? exercise.name : "",
+    previousSets,
+    plannedSets,
+    previousSummary,
+    plannedSummary,
+    progressionParts: buildExerciseReferenceProgressionParts(previousSummary, plannedSummary),
+    maxWeight: Math.max(0, ...previousSets.map((set) => Number(set.weight) || 0)),
+  };
+}
+
 function hasValidWorkoutData(workouts, exerciseId) {
   const sorted = sortWorkouts(workouts);
   for (const workout of sorted) {
@@ -1976,67 +2100,7 @@ function getLatestExerciseReference(
   exerciseId,
   { excludeWorkoutId = null } = {}
 ) {
-  const source = getLatestExerciseSource(workouts, exerciseId, { excludeWorkoutId });
-  if (!source) {
-    return null;
-  }
-
-  const { workout, exercise } = source;
-  const previousSummary = summarizeExerciseSets(exercise.sets);
-  const projectedSets = exercise.sets.map((set) => ({
-    ...set,
-    reps: Math.max(1, (Number(set.reps) || 0) + 1),
-  }));
-  const projectedSummary = summarizeExerciseSets(projectedSets);
-  const progressionParts = summarizeExerciseReferenceProgression(exercise.sets);
-  const maxWeight = Math.max(0, ...exercise.sets.map((set) => Number(set.weight) || 0));
-
-  return {
-    workoutId: Number.isFinite(Number(workout?.id)) ? Number(workout.id) : null,
-    workoutDate: typeof workout?.workout_date === "string" ? workout.workout_date : "",
-    exerciseName: typeof exercise.name === "string" ? exercise.name : "",
-    previousSummary,
-    projectedSummary,
-    progressionParts,
-    maxWeight,
-  };
-}
-
-function summarizeExerciseReferenceProgression(sets) {
-  if (!Array.isArray(sets) || !sets.length) {
-    return [];
-  }
-
-  const grouped = [];
-  let current = null;
-
-  sets.forEach((set) => {
-    const weight = Number(set.weight) || 0;
-    const reps = Number(set.reps) || 0;
-
-    if (current && current.weight === weight) {
-      current.reps.push(reps);
-      return;
-    }
-
-    if (current) {
-      grouped.push(current);
-    }
-
-    current = {
-      weight,
-      reps: [reps],
-    };
-  });
-
-  if (current) {
-    grouped.push(current);
-  }
-
-  return grouped.map((group) => ({
-    previousLabel: `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`,
-    nextLabel: summarizeRepRuns(group.reps.map((reps) => Math.max(1, Number(reps) + 1))),
-  }));
+  return getExercisePlanningContext(workouts, exerciseId, { excludeWorkoutId });
 }
 
 function getPlannedSetForExercise(
@@ -2046,34 +2110,23 @@ function getPlannedSetForExercise(
   { excludeWorkoutId = null } = {}
 ) {
   const normalizedIndex = Math.max(0, Number(draftSetIndex) || 0);
-  const source = getLatestExerciseSource(workouts, exerciseId, { excludeWorkoutId });
-  if (!source) {
+  const planningContext = getExercisePlanningContext(workouts, exerciseId, {
+    excludeWorkoutId,
+  });
+  if (!planningContext || !planningContext.plannedSets.length) {
     return {
       reps: 12,
-      weight: getWeightFromLastWorkout(workouts, exerciseId),
+      weight: 0,
       notes: null,
     };
   }
 
-  const sourceSets = source.exercise.sets
-    .map((set) => ({
-      reps: Math.max(1, Number(set.reps) || 0),
-      weight: Number(set.weight) || 0,
-      notes: set.notes ?? null,
-    }))
-    .filter((set) => set.reps > 0);
-
-  if (!sourceSets.length) {
-    return {
-      reps: 12,
-      weight: getWeightFromLastWorkout(workouts, exerciseId),
-      notes: null,
-    };
-  }
-
-  const templateSet = sourceSets[Math.min(normalizedIndex, sourceSets.length - 1)];
+  const templateSet =
+    planningContext.plannedSets[
+      Math.min(normalizedIndex, planningContext.plannedSets.length - 1)
+    ];
   return {
-    reps: Math.max(1, templateSet.reps + 1),
+    reps: templateSet.reps,
     weight: templateSet.weight,
     notes: null,
   };
@@ -3489,14 +3542,15 @@ function buildNextWorkoutPlanSuggestion(workouts) {
   const plannedExercises = exercises.map((exercise) => ({
     exercise_id: exercise.exercise_id,
     name: exercise.name,
-    sets: Array.isArray(exercise.sets)
-      ? exercise.sets.map((set, index) => ({
-          reps: Math.max(1, (Number(set.reps) || 0) + 1),
-          weight: Number(set.weight) || 0,
-          notes: typeof set.notes === "string" && set.notes.trim() ? set.notes.trim() : null,
-          set_index: index + 1,
-        }))
-      : [],
+    sets: buildNormalizedExerciseSets(exercise.sets, {
+      incrementReps: 1,
+      preserveNotes: true,
+    }).map((set, index) => ({
+      reps: set.reps,
+      weight: set.weight,
+      notes: set.notes,
+      set_index: index + 1,
+    })),
   }));
 
   return {
@@ -3568,7 +3622,6 @@ function renderNextPlanExerciseRow(exercise) {
 }
 
 function renderWorkoutCard(workout) {
-  const badge = workout.data.load_type ? renderLoadBadge(workout.data.load_type) : "";
   const isSwipeOpen = state.openSwipeCardId === workout.id;
   const dateSummary = `${formatLongDate(workout.workout_date)}, ${formatWeekday(workout.workout_date)}`;
   return `
@@ -3605,9 +3658,6 @@ function renderWorkoutCard(workout) {
       >
         <div class="workout-header">
           <div class="workout-date-line">${escapeHtml(dateSummary)}</div>
-          <div class="workout-header-side">
-            ${badge}
-          </div>
         </div>
         <div class="workout-exercise-list">
           ${workout.data.exercises.map((exercise) => renderLoggedExerciseCard(exercise)).join("")}
@@ -3706,6 +3756,8 @@ function summarizeExerciseSets(sets) {
     label: `${formatWeight(group.weight)}кг ×${summarizeRepRuns(group.reps)}`,
     editSetIndex: group.editSetIndex,
     notes: group.notes,
+    weight: group.weight,
+    reps: [...group.reps],
   }));
 
   return {
@@ -4505,7 +4557,7 @@ function renderExercisePicker(exercises, { hidePrimaryGrid = false } = {}) {
                         <button class="text-button exercise-picker-more-toggle" data-action="toggle-more-exercises">
                           ${
                             state.showAllExerciseOptions
-                              ? "Скрыть редкие упражнения"
+                              ? "Скрыть"
                               : `Ещё упражнения (${secondaryExercises.length})`
                           }
                         </button>
@@ -4526,7 +4578,7 @@ function renderExercisePicker(exercises, { hidePrimaryGrid = false } = {}) {
           ? `
             <div class="exercise-picker-more">
               <button class="text-button exercise-picker-more-toggle" data-action="toggle-more-exercises">
-                ${state.showAllExerciseOptions ? "Скрыть редкие упражнения" : `Ещё упражнения (${secondaryExercises.length})`}
+                ${state.showAllExerciseOptions ? "Скрыть" : `Ещё упражнения (${secondaryExercises.length})`}
               </button>
             </div>
           `
@@ -4536,7 +4588,6 @@ function renderExercisePicker(exercises, { hidePrimaryGrid = false } = {}) {
         shouldShowSecondary
           ? `
             <div class="exercise-picker-group exercise-picker-group-secondary">
-              <div class="exercise-picker-group-title">Все упражнения</div>
               ${renderExerciseTileGrid(secondaryExercises, { secondary: true })}
             </div>
           `
