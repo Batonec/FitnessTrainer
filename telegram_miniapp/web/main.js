@@ -4777,7 +4777,6 @@ function renderDraftCardActionMenu() {
     >
       <section class="modal-card draft-card-action-sheet draft-card-action-sheet-${draftCardActionMenuPresence}">
         <div class="stack">
-          <div class="modal-heading">Карточка упражнения</div>
           <div class="draft-card-action-sheet-title">${escapeHtml(exercise.exerciseName)}</div>
           <div class="draft-card-action-sheet-actions">
             <button

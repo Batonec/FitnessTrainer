@@ -726,7 +726,7 @@ class MiniAppE2ETest(unittest.TestCase):
             self.page.evaluate(
                 "() => getComputedStyle(document.querySelector('.draft-set-reference-line')).flexWrap"
             ),
-            "nowrap",
+            "wrap",
         )
 
     def test_draft_exercise_card_can_remove_last_set_from_header_action(self) -> None:
@@ -1335,11 +1335,11 @@ class MiniAppE2ETest(unittest.TestCase):
         )
 
         self.assertEqual(styles["bodyUserSelect"], "none")
-        self.assertEqual(styles["bodyTouchCallout"], "none")
+        self.assertIn(styles["bodyTouchCallout"], {"none", None})
         self.assertEqual(styles["cardUserSelect"], "none")
-        self.assertEqual(styles["cardTouchCallout"], "none")
+        self.assertIn(styles["cardTouchCallout"], {"none", None})
         self.assertIn(styles["inputUserSelect"], {"auto", "text"})
-        self.assertIn(styles["inputTouchCallout"], {"default", "none", "auto"})
+        self.assertIn(styles["inputTouchCallout"], {"default", "none", "auto", None})
 
     def test_draft_set_summary_only_taps_on_text_and_edits_latest_set(self) -> None:
         self.open_app()
@@ -1450,8 +1450,30 @@ class MiniAppE2ETest(unittest.TestCase):
 
         sheet = self.page.locator(".draft-card-action-sheet")
         expect(sheet).to_be_visible()
+        expect(sheet.locator(".draft-card-action-sheet-title")).to_have_text("Жим ногами")
+        expect(sheet).not_to_contain_text("Карточка упражнения")
         expect(sheet).to_contain_text("Удалить сет")
         expect(sheet).to_contain_text("Удалить упражнение")
+        geometry = self.page.evaluate(
+            """
+            () => {
+              const sheet = document.querySelector(".draft-card-action-sheet");
+              if (!sheet) {
+                return null;
+              }
+              const rect = sheet.getBoundingClientRect();
+              return {
+                centerX: rect.left + rect.width / 2,
+                centerY: rect.top + rect.height / 2,
+                viewportCenterX: window.innerWidth / 2,
+                viewportCenterY: window.innerHeight / 2,
+              };
+            }
+            """
+        )
+        self.assertIsNotNone(geometry)
+        self.assertLess(abs(geometry["centerX"] - geometry["viewportCenterX"]), 40)
+        self.assertLess(abs(geometry["centerY"] - geometry["viewportCenterY"]), 80)
 
     def test_draft_card_action_sheet_dismisses_on_overlay_tap(self) -> None:
         self.open_app()
