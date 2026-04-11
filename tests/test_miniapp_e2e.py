@@ -664,7 +664,7 @@ class MiniAppE2ETest(unittest.TestCase):
             self.page.evaluate(
                 "() => getComputedStyle(document.querySelector('.draft-exercise-reference-line')).flexWrap"
             ),
-            "nowrap",
+            "wrap",
         )
 
     def test_set_modal_shows_last_workout_reference_and_plus_one_target(self) -> None:
@@ -1303,7 +1303,7 @@ class MiniAppE2ETest(unittest.TestCase):
                 ).flexWrap
                 """
             ),
-            "nowrap",
+            "wrap",
         )
 
         self.page.locator(".exercise-card").filter(has_text="Жим ногами").locator(
@@ -1412,10 +1412,33 @@ class MiniAppE2ETest(unittest.TestCase):
         draft_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
         expect(draft_card.locator(".draft-exercise-reference-line")).to_contain_text("😣")
         expect(draft_card.locator(".draft-exercise-reference-line")).to_contain_text("😐")
+        expect(draft_card.locator(".exercise-reference-effort-slot")).to_have_count(2)
 
         draft_card.locator(".draft-primary-add-button").click()
         expect(draft_card.locator(".draft-set-summary-value")).not_to_contain_text("😣")
         expect(draft_card.locator(".draft-set-summary-value")).not_to_contain_text("😐")
+
+    def test_new_workout_reference_line_without_effort_renders_no_emoji_slot_gap(self) -> None:
+        self.seed_multi_exercise_workout(
+            client_id="effort-reference-none",
+            workout_date="2026-03-27",
+            exercises=[
+                {
+                    "exercise_id": 8,
+                    "name": "Жим ногами",
+                    "sets": [
+                        {"reps": 15, "weight": 80, "notes": None},
+                        {"reps": 13, "weight": 90, "notes": None},
+                    ],
+                }
+            ],
+        )
+        self.open_app()
+        self.open_new_workout()
+
+        draft_card = self.page.locator(".exercise-card").filter(has_text="Жим ногами")
+        expect(draft_card.locator(".draft-exercise-reference-line")).to_contain_text("→")
+        expect(draft_card.locator(".exercise-reference-effort-slot")).to_have_count(0)
 
     def test_draft_card_action_sheet_shows_remove_actions(self) -> None:
         self.open_app()

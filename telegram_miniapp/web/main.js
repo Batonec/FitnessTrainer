@@ -2061,8 +2061,9 @@ function buildExerciseReferenceProgressionParts(previousSummary, plannedSummary)
           : [];
 
     return {
-      previousLabel: segment.label,
+      previousLabel: `${formatWeight(segment.weight)}кг ×${summarizeRepRuns(segment.reps)}`,
       nextLabel: summarizeRepRuns(nextReps),
+      previousEffort: normalizeSetEffort(segment.effort),
     };
   });
 }
@@ -3824,9 +3825,18 @@ function renderReferenceProgressionParts(parts) {
     .map(
       (part) => `
         <span class="exercise-reference-part">
-          <span class="exercise-reference-prev">${escapeHtml(part.previousLabel)}</span>
+          <span class="exercise-reference-prev">
+            <span class="exercise-reference-text">${escapeHtml(part.previousLabel)}</span>
+            ${
+              part.previousEffort
+                ? `<span class="exercise-reference-effort-slot" aria-hidden="true">${getSetEffortMeta(part.previousEffort).icon}</span>`
+                : ""
+            }
+          </span>
           <span class="exercise-reference-arrow" aria-hidden="true">→</span>
-          <span class="exercise-reference-next">${escapeHtml(part.nextLabel)}</span>
+          <span class="exercise-reference-next">
+            <span class="exercise-reference-text">${escapeHtml(part.nextLabel)}</span>
+          </span>
         </span>
       `
     )

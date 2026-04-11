@@ -1167,25 +1167,17 @@ button {
 .draft-exercise-reference-line,
 .draft-set-reference-line {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 4px 8px;
   min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  white-space: nowrap;
-}
-
-.draft-exercise-reference-line::-webkit-scrollbar,
-.draft-set-reference-line::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
+  white-space: normal;
 }
 
 .exercise-reference-part {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   min-width: max-content;
   flex: 0 0 auto;
@@ -1194,9 +1186,13 @@ button {
 
 .exercise-reference-prev,
 .exercise-reference-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.015em;
+  line-height: 1.15;
 }
 
 .exercise-reference-prev {
@@ -1211,6 +1207,18 @@ button {
 
 .exercise-reference-next {
   color: #71a06a;
+}
+
+.exercise-reference-text {
+  line-height: inherit;
+}
+
+.exercise-reference-effort-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .draft-accent-circle-button,
@@ -1454,19 +1462,13 @@ button {
 .draft-set-summary-inline {
   display: inline-flex;
   align-items: baseline;
-  flex-wrap: nowrap;
+  align-content: flex-start;
+  flex-wrap: wrap;
   gap: 6px 10px;
   min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  white-space: nowrap;
-}
-
-.draft-set-summary-inline::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
+  white-space: normal;
 }
 
 .draft-set-summary-part,
