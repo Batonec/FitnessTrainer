@@ -39,6 +39,43 @@ body {
     0
     calc(84px + env(safe-area-inset-bottom))
     0;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.app-surface,
+.layout,
+.screen,
+.topbar,
+.card,
+.surface-card,
+.pill,
+.bottom-nav,
+.modal-card,
+.modal-overlay,
+.exercise-card,
+.workout-card,
+.workout-card-surface {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+option,
+[contenteditable="true"],
+[contenteditable="plaintext-only"] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+img,
+svg {
+  -webkit-user-drag: none;
 }
 
 button,

@@ -1311,6 +1311,36 @@ class MiniAppE2ETest(unittest.TestCase):
         ).click()
         expect(first_set.locator(".draft-set-summary-value")).to_contain_text("×2")
 
+    def test_mobile_ui_disables_selection_on_surfaces_but_keeps_inputs_editable(self) -> None:
+        self.open_app()
+        self.page.locator('[data-action="switch-tab"][data-tab="body"]').click()
+        expect(self.page.locator(".body-weight-number-input")).to_have_count(1)
+
+        styles = self.page.evaluate(
+            """
+            () => {
+              const bodyStyle = getComputedStyle(document.body);
+              const cardStyle = getComputedStyle(document.querySelector('.body-weight-panel'));
+              const inputStyle = getComputedStyle(document.querySelector('.body-weight-number-input'));
+              return {
+                bodyUserSelect: bodyStyle.userSelect,
+                bodyTouchCallout: bodyStyle.webkitTouchCallout,
+                cardUserSelect: cardStyle.userSelect,
+                cardTouchCallout: cardStyle.webkitTouchCallout,
+                inputUserSelect: inputStyle.userSelect,
+                inputTouchCallout: inputStyle.webkitTouchCallout,
+              };
+            }
+            """
+        )
+
+        self.assertEqual(styles["bodyUserSelect"], "none")
+        self.assertEqual(styles["bodyTouchCallout"], "none")
+        self.assertEqual(styles["cardUserSelect"], "none")
+        self.assertEqual(styles["cardTouchCallout"], "none")
+        self.assertIn(styles["inputUserSelect"], {"auto", "text"})
+        self.assertIn(styles["inputTouchCallout"], {"default", "none", "auto"})
+
     def test_draft_set_summary_only_taps_on_text_and_edits_latest_set(self) -> None:
         self.open_app()
         self.open_new_workout()
