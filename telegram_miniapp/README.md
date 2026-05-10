@@ -1,36 +1,44 @@
 # Trainer Telegram Mini App
 
-Текущий `Trainer` — это Telegram Mini App с собственным backend API на SQLite, Telegram-ботом и browser debug-режимом для локальной разработки.
+Текущий `Trainer` — это Telegram Mini App с собственным backend API на SQLite, Telegram-ботом, browser debug-режимом и CI/deploy цепочкой на VPS.
 
-## Что есть сейчас
+Этот документ отвечает на технический вопрос “из чего это собрано, как запустить, как тестировать и как выкатывать”.
 
-- Telegram-бот выставляет menu button `Trainer` и команду `/start`;
-- Mini App работает как полноценный web-интерфейс;
-- backend хранит:
-  - пользователей;
-  - тренировки;
-  - записи веса тела;
-- обычный браузер без Telegram может автоматически входить как debug-user;
-- если Telegram не прислал signed `initData`, сервер умеет fallback/recovery режимы;
-- новая тренировка создаётся через FAB на экране `Trainings`;
-- сохранённый draft восстанавливается после перезагрузки;
-- экран `New Workout` сразу показывает preview-карточки основных упражнений из реальной истории, а не пустой picker;
-- быстрый tap по синему `+` в карточке упражнения добавляет planned set по прошлой тренировке;
-- long press по синему `+` открывает ручной set-modal;
-- в set-modal можно отметить тяжесть подхода через `🙂 / 😐 / 😣`;
-- long press по самой карточке упражнения открывает центрированную модалку с удалением последнего сета или всего упражнения;
-- set-modal закрывается тапом вне модалки и использует компактные stepper-контролы для веса и повторений;
-- экран `Weight` работает на backend и умеет удалять запись по тапу на точку графика;
-- старая debug-заглушка по-прежнему доступна отдельно как `stub.html`.
+Продуктовая спецификация лежит отдельно:
 
-## Структура
+- [BUSINESS_LOGIC.md](../BUSINESS_LOGIC.md)
 
-- [telegram_miniapp/server.py](./server.py) — backend API, session resolve и локальная раздача статики
+## Что входит в текущую систему
+
+- [telegram_miniapp/web](./web) — frontend Mini App
+- [telegram_miniapp/server.py](./server.py) — HTTP API, Telegram auth/session resolve, раздача статики
 - [telegram_miniapp/backend_store.py](./backend_store.py) — SQLite storage
 - [telegram_miniapp/bot.py](./bot.py) — Telegram-бот
 - [telegram_miniapp/dev_server.py](./dev_server.py) — локальный dev launcher с autoreload
-- [telegram_miniapp/web](./web) — frontend Mini App и статические данные
 - [tests](../tests) — unit, integration и browser e2e тесты
+
+## Текущее поведение продукта с технической точки зрения
+
+Сейчас Mini App умеет:
+
+- запускаться из Telegram и резолвить signed user context;
+- fallback-иться в `telegram_unsafe` или `telegram_recovery`, если Telegram launch payload пришёл неполным;
+- работать в локальном браузере как debug-user;
+- показывать три экрана:
+  - `Trainings`
+  - `Progress`
+  - `Weight`
+- открывать новую тренировку через FAB на `Trainings`;
+- восстанавливать живой draft тренировки из `localStorage`;
+- стартовать `New Workout` сразу с preview-карточками основной шестёрки упражнений;
+- использовать одну и ту же общую план-логику для:
+  - reference-строки `прошлое выполнение → план`
+  - быстрого planned add
+  - стартовых значений set-modal
+  - кольцевого прогресса вокруг FAB
+- хранить per-set `effort` (`easy / ok / hard`) и показывать его как `🙂 / 😐 / 😣`;
+- удалять сет или упражнение через центрированную modal-карточку по long press;
+- хранить и удалять записи веса тела через backend.
 
 ## Основные HTTP endpoints
 
@@ -46,16 +54,16 @@
 - `POST /api/body-weights`
 - `DELETE /api/body-weights/{id}`
 
-## Быстрый локальный запуск
+## Локальный запуск
 
-### 1. Запуск backend + статики
+### 1. Запуск backend и статики
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
 BOT_TOKEN=123456:ABCDEF python3 telegram_miniapp/server.py
 ```
 
-Локально приложение будет доступно на:
+После запуска приложение доступно на:
 
 ```text
 http://127.0.0.1:8080/
@@ -63,12 +71,12 @@ http://127.0.0.1:8080/
 
 В этом режиме:
 
-- backend API и статика поднимаются вместе;
+- backend и статика поднимаются вместе;
 - SQLite хранится локально;
 - браузер без Telegram может автоматически получить debug-user;
-- UI-состояние вроде draft/tab/range хранится в `localStorage`.
+- UI-состояния вроде draft/tab/range живут в `localStorage`.
 
-Старая debug-страница доступна отдельно:
+Отдельная debug-страница для Telegram stub-сценариев:
 
 ```text
 http://127.0.0.1:8080/stub.html
@@ -81,13 +89,13 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 BOT_TOKEN=123456:ABCDEF python3 telegram_miniapp/dev_server.py
 ```
 
-Что делает launcher:
+Launcher:
 
 - следит за `.py` файлами и перезапускает backend;
 - даёт live reload фронта;
-- оставляет приложение на `http://127.0.0.1:8080/`.
+- держит приложение на `http://127.0.0.1:8080/`.
 
-## Запуск бота
+## Запуск Telegram-бота
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
@@ -96,55 +104,118 @@ BOT_TOKEN=123456:ABCDEF WEB_APP_URL=https://trainer-miniapp.example.com python3 
 
 Бот:
 
-- настраивает menu button `Trainer`;
+- выставляет menu button `Trainer`;
 - отвечает на `/start`, `/menu`, `/help`;
 - открывает Mini App по `WEB_APP_URL`.
 
-## Что проверять вручную
+## Что важно понимать про клиентскую логику
 
-В актуальном интерфейсе должны быть:
+### Draft и план тренировки
 
-- вкладка `Trainings`;
-- вкладка `Progress`;
-- вкладка `Weight`;
-- FAB `+` для входа в конструктор тренировки;
-- swipe edit/delete у карточек тренировок;
-- восстановление draft;
-- preview-карточки основных упражнений в `New Workout`;
-- compact reference-строка `прошлый результат → план` в карточке упражнения и set-modal;
-- быстрый tap по синему `+` как planned add, а long press по нему как ручной ввод;
-- выбор тяжести подхода через `🙂 / 😐 / 😣` в set-modal;
-- центрированная модалка удаления по long press на карточке упражнения;
-- inline-ввод веса тела и график;
-- отдельная старая страница `/stub.html` для отладочных Telegram-сценариев.
+- источник прошлой тренировки ищется по последнему релевантному выполнению упражнения;
+- planned set = прошлый set с `+1` к повторениям;
+- быстрый тап по синему `+` добавляет следующий planned set;
+- long press по синему `+` открывает ручной ввод;
+- reference-строка и set-modal обязаны использовать один и тот же плановый helper.
+
+### Per-set effort
+
+У каждого сета может быть:
+
+- `easy`
+- `ok`
+- `hard`
+- `null`
+
+На UI это отображается как:
+
+- `🙂`
+- `😐`
+- `😣`
+
+Effort хранится в backend, проходит нормализацию в store и используется в summary-строках без свободного текстового комментария.
+
+### Прогресс-кольцо вокруг FAB
+
+Кольцо вокруг FAB на `Trainings` и `New Workout` считается по основной шестёрке упражнений.
+
+Важно:
+
+- прогресс считается не по факту “у упражнения появился хотя бы один сет”;
+- он считается дробно по количеству выполненных planned sets относительно полного плана упражнения;
+- кольцо анимируется вперёд и назад при изменении draft-state.
+
+### Telegram shell
+
+При инициализации frontend старается:
+
+- вызвать `disableVerticalSwipes()`;
+- вызвать `requestFullscreen()`.
+
+Это улучшает полноэкранный UX в Telegram-клиентах, которые поддерживают соответствующий Bot API WebApp surface.
 
 ## Полезные переменные окружения
 
 ### Для `server.py`
 
 - `BOT_TOKEN` — включает серверную валидацию Telegram `initData`
-- `MINIAPP_STATIC_DIR` — каталог со статикой
+- `MINIAPP_STATIC_DIR`
 - `MINIAPP_HOST` — по умолчанию `127.0.0.1`
 - `MINIAPP_PORT` — по умолчанию `8080`
-- `MINIAPP_MAX_AUTH_AGE` — максимальный возраст Telegram auth payload
-- `MINIAPP_DEV_MODE` — включает dev-поведение
-- `MINIAPP_ALLOW_DEBUG_USER` — разрешает browser debug-user
+- `MINIAPP_MAX_AUTH_AGE`
+- `MINIAPP_DEV_MODE`
+- `MINIAPP_ALLOW_DEBUG_USER`
 - `MINIAPP_DEFAULT_DEBUG_USER_ALIAS`
 - `MINIAPP_DEFAULT_DEBUG_USER_FIRST_NAME`
 - `MINIAPP_DEFAULT_DEBUG_USER_LAST_NAME`
-- `MINIAPP_DB_PATH` — путь к SQLite базе
-- `MINIAPP_SESSION_SECRET` — секрет подписи session cookie
-- `MINIAPP_SESSION_MAX_AGE` — TTL session cookie
-- `MINIAPP_COOKIE_SECURE` — добавляет `Secure` флаг
-- `MINIAPP_TELEGRAM_RECOVERY_USER_ID` — recovery-user для Telegram-shell
+- `MINIAPP_DB_PATH`
+- `MINIAPP_SESSION_SECRET`
+- `MINIAPP_SESSION_MAX_AGE`
+- `MINIAPP_COOKIE_SECURE`
+- `MINIAPP_TELEGRAM_RECOVERY_USER_ID`
 
 ### Для `bot.py`
 
-- `BOT_TOKEN` — обязателен
-- `WEB_APP_URL` — обязателен
-- `BOT_POLL_TIMEOUT` — таймаут long polling
+- `BOT_TOKEN`
+- `WEB_APP_URL`
+- `BOT_POLL_TIMEOUT`
 
-## Деплой на VPS одной командой
+## Что проверять вручную
+
+В актуальном интерфейсе должны быть:
+
+- вкладки `Trainings`, `Progress`, `Weight`;
+- FAB `+` на `Trainings`;
+- swipe edit/delete у карточек истории тренировок;
+- восстановление живого draft;
+- preview-карточки основной шестёрки в `New Workout`;
+- compact reference-строка `прошлое выполнение → план`;
+- быстрый planned add по синему `+`;
+- long press по синему `+` как ручной set-modal;
+- выбор `effort` в set-modal;
+- центрированная modal-карточка удаления по long press на карточке упражнения;
+- экран `Weight` с inline composer и удалением записи по точке графика.
+
+## Локальный запуск тестов
+
+Быстрый прогон:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Полный прогон:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+## Деплой на VPS
 
 Для текущего VPS есть готовый скрипт:
 
@@ -170,49 +241,33 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 
 ## GitHub Actions
 
-В репозитории настроены:
+Основной workflow:
 
-- [ci.yml](../.github/workflows/ci.yml) — тесты и orchestration deploy jobs
-- [deploy-web.yml](../.github/workflows/deploy-web.yml) — web deploy
-- [deploy-backend.yml](../.github/workflows/deploy-backend.yml) — backend deploy
-- [deploy-bot.yml](../.github/workflows/deploy-bot.yml) — bot deploy
+- [ci.yml](../.github/workflows/ci.yml)
+
+Что делает `ci.yml`:
+
+- детектит, менялись ли `web`, `backend`, `bot`;
+- прогоняет полный test suite;
+- после успешного test job на `main` запускает только релевантные deploy workflows.
+
+Reusable workflows:
+
+- [deploy-web.yml](../.github/workflows/deploy-web.yml)
+- [deploy-backend.yml](../.github/workflows/deploy-backend.yml)
+- [deploy-bot.yml](../.github/workflows/deploy-bot.yml)
 
 Важно:
 
-- деплой запускается только после успешного CI;
-- backend workflow предполагает, что на VPS уже существует `/etc/trainer-miniapp/backend.env`;
-- bot workflow предполагает, что на VPS уже существует `/etc/trainer-miniapp/bot.env`.
+- deploy не должен происходить без зелёных тестов;
+- backend workflow предполагает существование `/etc/trainer-miniapp/backend.env` на VPS;
+- bot workflow предполагает существование `/etc/trainer-miniapp/bot.env` на VPS.
 
 ### GitHub Secrets
 
-Нужны secrets:
+Нужны:
 
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
 - `VPS_PORT` — опционально
-
-## Локальный запуск тестов
-
-Быстрый прогон:
-
-```bash
-cd /Users/batonec/AndroidStudioProjects/Trainer
-python3 -m unittest discover -s tests -p "test_*.py" -v
-```
-
-Полный прогон:
-
-```bash
-cd /Users/batonec/AndroidStudioProjects/Trainer
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m playwright install chromium
-.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-## Куда смотреть за продуктовой логикой
-
-Продуктовая спецификация живёт здесь:
-
-- [BUSINESS_LOGIC.md](../BUSINESS_LOGIC.md)

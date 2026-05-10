@@ -1,66 +1,89 @@
 # Trainer Mini App
 
-`Trainer` — это Telegram Mini App для учёта тренировок и веса тела.
+`Trainer` — это Telegram Mini App для ведения истории тренировок, отслеживания прогресса по упражнениям и контроля веса тела.
 
-Актуальное состояние репозитория содержит только Mini App, backend, Telegram-бота, тесты и документацию. Старый Android-проект сохранён в истории git, но в текущем состоянии репозитория его больше нет.
+В текущем состоянии репозиторий содержит:
 
-## Быстрые ссылки
+- web-клиент Mini App;
+- backend API на SQLite;
+- Telegram-бота;
+- unit / integration / browser e2e тесты;
+- документацию по продуктовой и технической логике.
 
-- [Бизнес-логика продукта](./BUSINESS_LOGIC.md)
-- [Технический README по запуску, переменным окружения и деплою](./telegram_miniapp/README.md)
-- [Frontend Mini App](./telegram_miniapp/web)
-- [Backend API](./telegram_miniapp/server.py)
-- [SQLite storage](./telegram_miniapp/backend_store.py)
-- [Telegram-бот](./telegram_miniapp/bot.py)
-- [GitHub Actions workflows](./.github/workflows)
-- [Скрипт деплоя на VPS](./telegram_miniapp/deploy/deploy.sh)
+Старый Android-клиент сохранён только в истории git. Актуальный продукт сейчас живёт вокруг Mini App.
 
-## Что сейчас умеет продукт
+## Навигация по документации
 
-- запускаться как Telegram Mini App из [telegram_miniapp/bot.py](./telegram_miniapp/bot.py);
+- [BUSINESS_LOGIC.md](./BUSINESS_LOGIC.md) — продуктовая логика и инварианты
+- [telegram_miniapp/README.md](./telegram_miniapp/README.md) — технический README по Mini App, backend, env и деплою
+- [telegram_miniapp/web](./telegram_miniapp/web) — frontend
+- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — HTTP API и session/auth logic
+- [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py) — SQLite storage и нормализация данных
+- [telegram_miniapp/bot.py](./telegram_miniapp/bot.py) — Telegram-бот
+- [tests](./tests) — тестовый suite
+- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — deploy tooling
+
+## Что умеет продукт сейчас
+
+- запускаться как Telegram Mini App из бота;
+- работать в локальном браузере как debug-user для разработки;
 - показывать историю тренировок на экране `Trainings`;
-- создавать новую тренировку через FAB, а не через отдельную вкладку;
-- сразу показывать в конструкторе тренировок основные упражнения как preview-карточки, а не пустой экран;
+- открывать новую тренировку по FAB `+`, а не через отдельную вкладку;
 - восстанавливать незавершённый черновик тренировки;
-- поддерживать суперсеты и параллельное ведение нескольких упражнений в одном черновике;
-- подсказывать основную подборку упражнений из реальной истории тренировок;
-- показывать в карточке упражнения и в модалке сета компактную подсказку `было → план`, построенную по последней тренировке;
-- коротким тапом по синей кнопке `+` добавлять следующий сет по плану, а удержанием открывать ручной ввод;
-- позволять отмечать тяжесть отдельного сета через быстрые `🙂 / 😐 / 😣`;
-- удалять последний сет или всё упражнение из draft через центрированную long-press модалку действий;
-- редактировать и удалять сохранённые тренировки;
+- не стартовать пустым экраном: сразу показывать preview-карточки основной шестёрки упражнений;
+- поддерживать суперсеты и параллельное ведение нескольких упражнений;
+- строить план по упражнению из последнего выполнения и использовать его везде одинаково:
+  - в карточке упражнения;
+  - в set-modal;
+  - в быстром planned add по синей кнопке `+`;
+- добавлять planned set коротким тапом по синей кнопке `+`;
+- открывать ручной ввод сета long press-ом по этой же кнопке `+`;
+- сохранять оценку тяжести каждого сета через `🙂 / 😐 / 😣`;
+- показывать эту оценку в текущем draft, в истории тренировок и в reference-строках прошлого выполнения;
+- удалять последний сет или всё упражнение через центрированную long-press модалку карточки упражнения;
 - показывать прогресс по выбранному упражнению на экране `Progress`;
-- вести отдельный экран `Weight` для контроля веса тела;
-- сохранять вес тела на backend и удалять запись по тапу на точку графика;
-- хранить пользовательские данные на SQLite backend, а не в `localStorage`;
-- запускаться в обычном браузере как debug-user для локальной разработки;
-- проходить через CI и деплоиться на VPS только после успешных тестов.
+- показывать отдельный экран `Weight` с графиком, inline-вводом и удалением записи по тапу на точку;
+- хранить тренировки и вес тела на backend, а не в `localStorage`;
+- прогоняться через CI и деплоиться на VPS после зелёных тестов.
 
-## Коротко про текущую архитектуру
+## Текущий продуктовый UX в двух словах
 
-- [telegram_miniapp/web](./telegram_miniapp/web) — основной frontend Mini App;
-- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — HTTP API, Telegram auth/session resolve и локальная раздача статики;
-- [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py) — SQLite storage для пользователей, тренировок и веса тела;
-- [telegram_miniapp/bot.py](./telegram_miniapp/bot.py) — Telegram-бот на long polling;
-- [tests](./tests) — unit, integration и browser e2e тесты;
-- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — VPS deploy tooling;
-- [BUSINESS_LOGIC.md](./BUSINESS_LOGIC.md) — продуктовая спецификация.
+- Нижняя навигация состоит из `Trainings`, `Progress` и `Weight`.
+- На `Trainings` показывается серверная история тренировок текущего пользователя в компактных карточках.
+- На карточке сохранённой тренировки упражнения и сеты схлопываются в короткие summary-строки.
+- Load-type (`heavy / medium / light`) по-прежнему вычисляется и хранится, но в текущем UX на карточках истории не показывается.
+- Если есть живой draft, FAB на `Trainings` становится входом обратно в конструктор.
+- Вокруг FAB показывается кольцевой прогресс по основной шестёрке упражнений.
+- Этот прогресс сейчас считается дробно: по доле выполненных planned sets, а не просто по факту “в упражнении появился хотя бы один сет”.
+- `New Workout` сразу показывает preview-карточки основной шестёрки упражнений и редкий каталог под плашкой `Ещё упражнения`.
+- Каждая карточка упражнения показывает reference-строку `прошлое выполнение → план`, построенную из одного и того же общего источника плановой логики.
+- Реально добавленные сеты показываются отдельной синей строкой и используют ту же логику схлопывания, что и история тренировок.
+- Set-modal компактная, без кнопки `Отмена`, закрывается тапом вне модалки и позволяет выбрать `effort`.
+- Long press по карточке упражнения открывает центрированную action-модалку удаления.
+- Экран `Weight` хранит одну запись на дату и поддерживает удаление записи через тап по точке графика.
 
-## Текущий UX в двух словах
+## Что считается источником истины
 
-- Нижняя навигация сейчас состоит из `Trainings`, `Progress` и `Weight`.
-- Создание тренировки открывается по плавающей кнопке `+` на экране `Trainings`.
-- Если есть живой черновик, `+` превращается в точку входа обратно в конструктор, а вокруг FAB показывается прогресс по основной плитке упражнений.
-- Экран `New Workout` не стартует пустым: он сразу показывает preview-карточки основных упражнений и кнопку `Ещё упражнения` для редких.
-- В карточке упражнения видна компактная строка `прошлый результат → план`, а реальный ход текущей тренировки выводится отдельной синей строкой.
-- Большой синий `+` в карточке добавляет следующий planned set, а long press по нему открывает ручной set-modal.
-- В set-modal можно выбрать оценку тяжести подхода (`🙂 / 😐 / 😣`), и она потом видна в истории и в текущем draft.
-- Long press по самой карточке упражнения открывает центрированную модалку с удалением последнего сета или всего упражнения.
-- Экран `Progress` показывает количество тренировок за период и рост веса/повторов по выбранному упражнению.
-- Экран `Weight` показывает диапазоны `7D / 30D / All`, inline-ввод веса, summary-strip и график веса тела.
-- Отдельная карточка `План следующей тренировки` в коде сохранена, но в UI отключена флагом; вместо неё используются inline-подсказки внутри конструктора.
+- история тренировок — backend / SQLite;
+- записи веса тела — backend / SQLite;
+- справочник упражнений — [telegram_miniapp/web/data/exercises.json](./telegram_miniapp/web/data/exercises.json);
+- черновик тренировки и некоторые UI-состояния — `localStorage`.
+
+`localStorage` не считается источником истины для уже сохранённых тренировок и веса тела.
+
+## Коротко про архитектуру
+
+- [telegram_miniapp/web](./telegram_miniapp/web) — основной frontend Mini App
+- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — API, session resolve, Telegram auth, раздача статики
+- [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py) — SQLite persistence и нормализация данных
+- [telegram_miniapp/bot.py](./telegram_miniapp/bot.py) — Telegram-бот на long polling
+- [tests](./tests) — unit, integration и browser e2e тесты
+- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — ручной deploy на VPS
+- [.github/workflows](./.github/workflows) — CI и deploy pipelines
 
 ## Локальный запуск
+
+Быстрый старт:
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
@@ -73,18 +96,18 @@ python3 telegram_miniapp/dev_server.py
 http://127.0.0.1:8080/
 ```
 
-Для локальной отладки браузер без Telegram автоматически получает debug-сессию.
+В браузере без Telegram сервер автоматически выдаёт debug-user, если debug-режим разрешён переменными окружения.
 
 ## Тесты
 
-Быстрый прогон:
+Быстрый запуск:
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Полный прогон c browser e2e:
+Полный запуск с browser e2e:
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
@@ -96,29 +119,46 @@ python3 -m venv .venv
 
 ## Деплой
 
-Локальный ручной деплой на текущий VPS:
+Ручной деплой на текущий VPS:
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
 ./telegram_miniapp/deploy/deploy.sh web
 ```
 
-Полное описание окружения, сервисов и GitHub Actions лежит в:
+Полное техническое описание окружения, сервисов и deploy flow лежит в:
 
 - [telegram_miniapp/README.md](./telegram_miniapp/README.md)
 
 ## GitHub Actions
 
-В репозитории настроены workflow, где тесты являются пререквизитом для деплоя:
+Основной workflow:
 
-- [ci.yml](./.github/workflows/ci.yml) — тесты на каждый `push` и `pull_request`, плюс orchestration deploy jobs на `main`;
-- [deploy-web.yml](./.github/workflows/deploy-web.yml) — web deploy;
-- [deploy-backend.yml](./.github/workflows/deploy-backend.yml) — backend deploy;
-- [deploy-bot.yml](./.github/workflows/deploy-bot.yml) — bot deploy.
+- [ci.yml](./.github/workflows/ci.yml)
 
-Для работы GitHub Actions нужны secrets:
+Что он делает:
+
+- определяет, затронуты ли `web`, `backend` и/или `bot`;
+- всегда прогоняет полный test suite;
+- после зелёного тестового job запускает точечный deploy на `main` только для реально затронутых частей.
+
+Дополнительные reusable workflows:
+
+- [deploy-web.yml](./.github/workflows/deploy-web.yml)
+- [deploy-backend.yml](./.github/workflows/deploy-backend.yml)
+- [deploy-bot.yml](./.github/workflows/deploy-bot.yml)
+
+Нужные GitHub secrets:
 
 - `VPS_HOST`
 - `VPS_USER`
 - `VPS_SSH_KEY`
 - `VPS_PORT` — опционально
+
+## Где смотреть за текущей логикой
+
+Если нужен именно продуктовый ответ “как это должно работать сейчас”, сначала смотри:
+
+1. [BUSINESS_LOGIC.md](./BUSINESS_LOGIC.md)
+2. [telegram_miniapp/web/main.js](./telegram_miniapp/web/main.js)
+3. [tests](./tests)
