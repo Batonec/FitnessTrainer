@@ -1,0 +1,100 @@
+# Trainer iOS
+
+Нативный SwiftUI-клиент для текущего `Trainer` backend.
+
+Этот проект повторяет актуальную логику Telegram Mini App из соседнего репозитория:
+
+- три вкладки: `Trainings`, `Progress`, `Weight`;
+- история тренировок с compact-summary сетов;
+- редактирование и удаление сохранённой тренировки через свайп карточки влево;
+- создание и редактирование тренировки через отдельный `New Workout` flow;
+- preview-карточки основной шестёрки упражнений;
+- planned add по синей кнопке `+`;
+- ручной ввод сета через long press по `+`;
+- per-set effort: `🙂 / 😐 / 😣`;
+- draft тренировки в `UserDefaults`;
+- кольцевой прогресс по основной шестёрке;
+- экран прогресса по упражнению;
+- экран веса тела с inline-вводом, графиком и удалением записи по тапу на точку.
+- нативная сессия без внешней авторизации: клиент запрашивает backend-user `id=3`.
+
+## Backend
+
+По умолчанию приложение ходит в:
+
+```text
+https://trainer.superbatonec.org
+```
+
+Для локальной разработки можно поменять URL через шестерёнку на `http://127.0.0.1:8080` и запустить backend из соседнего проекта:
+
+```bash
+cd /Users/batonec/AndroidStudioProjects/Trainer
+MINIAPP_DEV_MODE=1 python3 telegram_miniapp/dev_server.py
+```
+
+В iOS-приложении адрес backend можно поменять через шестерёнку на экране `Trainings`.
+
+Нативный iOS-клиент не получает Telegram `initData`. Сейчас в клиенте намеренно захардкожен backend-user:
+
+- iOS отправляет `shell=ios` и `native_user_id=3` в `POST /api/session/resolve`;
+- backend проверяет, что такой пользователь есть в SQLite;
+- после этого backend выдаёт обычную cookie `trainer_session`;
+- все остальные endpoints остаются теми же, что у Mini App.
+
+Если пользователя `id=3` нет на backend, приложение покажет экран повтора подключения и настройки URL.
+
+## Сборка
+
+Открой:
+
+```text
+TrainerIOS.xcodeproj
+```
+
+Или проверь из терминала:
+
+```bash
+xcodebuild \
+  -project TrainerIOS.xcodeproj \
+  -scheme TrainerIOS \
+  -destination 'generic/platform=iOS Simulator' \
+  build
+```
+
+## Тесты
+
+В проекте есть XCTest target `TrainerIOSTests`. Он проверяет Swift-перенос бизнес-логики Mini App, модели API, backend endpoints из README, fallback-каталог `Resources/exercises.json` и persistence в `UserDefaults`.
+
+```bash
+xcodebuild \
+  -project TrainerIOS.xcodeproj \
+  -scheme TrainerIOS \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  test
+```
+
+## Что внутри
+
+- `TrainerIOSApp.swift` — entrypoint приложения.
+- `Models.swift` — модели API, draft и UI-состояний.
+- `APIClient.swift` — HTTP-клиент для текущих backend endpoints.
+- `TrainerLogic.swift` — перенос бизнес-логики Mini App: сортировки, planned sets, summary, progress, weight stats.
+- `TrainerStore.swift` — observable app state, persistence draft/settings, API mutations.
+- `Views.swift` — SwiftUI-экраны и компоненты.
+- `Resources/exercises.json` — fallback-каталог упражнений из Mini App.
+
+## API-контракт
+
+Клиент использует существующие endpoints:
+
+- `POST /api/session/resolve`
+- `POST /api/session/logout`
+- `GET /data/exercises.json`
+- `GET /api/workouts`
+- `POST /api/workouts`
+- `PUT /api/workouts/{id}`
+- `DELETE /api/workouts/{id}`
+- `GET /api/body-weights`
+- `POST /api/body-weights`
+- `DELETE /api/body-weights/{id}`
