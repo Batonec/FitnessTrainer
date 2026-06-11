@@ -168,6 +168,9 @@ class MiniAppStore:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        # Recommendations are written from a background thread; wait instead of
+        # immediately failing with 'database is locked' on concurrent writes.
+        connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
     @contextmanager
@@ -223,6 +226,22 @@ class MiniAppStore:
 
                 CREATE INDEX IF NOT EXISTS idx_body_weights_user_date
                 ON body_weights(user_id, entry_date ASC, id ASC);
+
+                CREATE TABLE IF NOT EXISTS recommendations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL,
+                    based_on_workout_id INTEGER,
+                    based_on_workout_count INTEGER,
+                    model TEXT,
+                    payload_json TEXT,
+                    error TEXT,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    UNIQUE(user_id)
+                );
                 """
             )
 
@@ -459,6 +478,125 @@ class MiniAppStore:
             )
 
         return self._deserialize_workout(existing)
+
+    def get_latest_workout_id(self, user_id: int) -> int | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id FROM workouts
+                WHERE user_id = ?
+                ORDER BY workout_date DESC, id DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+        return int(row["id"]) if row is not None else None
+
+    def get_recommendation(self, user_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM recommendations WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        return self._deserialize_recommendation(row) if row is not None else None
+
+    def set_recommendation_pending(self, user_id: int) -> None:
+        timestamp = utc_now()
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO recommendations (user_id, status, created_at, updated_at)
+                VALUES (?, 'pending', ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    status = 'pending',
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, timestamp, timestamp),
+            )
+
+    def save_recommendation(
+        self,
+        user_id: int,
+        based_on_workout_id: int | None,
+        based_on_workout_count: int,
+        model: str,
+        recommendation: dict[str, Any],
+        input_tokens: int | None,
+        output_tokens: int | None,
+    ) -> dict[str, Any]:
+        timestamp = utc_now()
+        payload_json = json.dumps(recommendation, ensure_ascii=False)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO recommendations (
+                    user_id, status, based_on_workout_id, based_on_workout_count,
+                    model, payload_json, error, input_tokens, output_tokens,
+                    created_at, updated_at
+                )
+                VALUES (?, 'ready', ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    status = 'ready',
+                    based_on_workout_id = excluded.based_on_workout_id,
+                    based_on_workout_count = excluded.based_on_workout_count,
+                    model = excluded.model,
+                    payload_json = excluded.payload_json,
+                    error = NULL,
+                    input_tokens = excluded.input_tokens,
+                    output_tokens = excluded.output_tokens,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    user_id,
+                    based_on_workout_id,
+                    based_on_workout_count,
+                    model,
+                    payload_json,
+                    input_tokens,
+                    output_tokens,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM recommendations WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Failed to persist recommendation")
+        return self._deserialize_recommendation(row)
+
+    def fail_recommendation(self, user_id: int, error: str) -> None:
+        timestamp = utc_now()
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO recommendations (user_id, status, error, created_at, updated_at)
+                VALUES (?, 'failed', ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    status = 'failed',
+                    error = excluded.error,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, error[:500], timestamp, timestamp),
+            )
+
+    def _deserialize_recommendation(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload_raw = row["payload_json"]
+        recommendation = json.loads(payload_raw) if payload_raw else None
+        return {
+            "id": row["id"],
+            "status": row["status"],
+            "based_on_workout_id": row["based_on_workout_id"],
+            "based_on_workout_count": row["based_on_workout_count"],
+            "model": row["model"],
+            "recommendation": recommendation,
+            "error": row["error"],
+            "input_tokens": row["input_tokens"],
+            "output_tokens": row["output_tokens"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     def list_body_weights(self, user_id: int) -> list[dict[str, Any]]:
         with self._connection() as connection:

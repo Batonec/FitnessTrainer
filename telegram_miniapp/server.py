@@ -6,6 +6,7 @@ import hmac
 import json
 import mimetypes
 import os
+import threading
 import time
 from http.cookies import SimpleCookie
 from http import HTTPStatus
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
+import recommender
 from backend_store import MiniAppStore
 
 
@@ -37,6 +39,81 @@ SESSION_MAX_AGE_SECONDS = int(os.getenv("MINIAPP_SESSION_MAX_AGE", "2592000"))
 COOKIE_SECURE = os.getenv("MINIAPP_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
 WATCHED_EXTENSIONS = {".py", ".html", ".css", ".js", ".json", ".md"}
 STORE = MiniAppStore(DB_PATH)
+
+try:
+    EXERCISE_CATALOG: list[dict[str, Any]] | None = recommender.load_catalog(STATIC_DIR)
+except Exception as exc:  # noqa: BLE001
+    EXERCISE_CATALOG = None
+    print(f"[miniapp] WARNING: exercise catalog not loaded, recommendations disabled: {exc}")
+
+# Minimum seconds between two manual /refresh starts for one user (debounce the
+# open ios_fixed_user auth path so the paid endpoint can't be hammered).
+REFRESH_MIN_INTERVAL = float(os.getenv("RECOMMENDATION_REFRESH_MIN_INTERVAL", "10"))
+
+_recommendation_locks: dict[int, threading.Lock] = {}
+_recommendation_locks_guard = threading.Lock()
+_last_refresh_started: dict[int, float] = {}
+
+
+def _user_recommendation_lock(user_id: int) -> threading.Lock:
+    with _recommendation_locks_guard:
+        lock = _recommendation_locks.get(user_id)
+        if lock is None:
+            lock = threading.Lock()
+            _recommendation_locks[user_id] = lock
+        return lock
+
+
+def _generate_and_store_recommendation(user_id: int) -> dict[str, Any] | None:
+    """Run one generation and persist it. Returns the stored 'ready' row, or
+    None on failure (a 'failed' row carrying the error message is persisted)."""
+    if EXERCISE_CATALOG is None:
+        STORE.fail_recommendation(user_id, "Каталог упражнений недоступен")
+        return None
+
+    workouts = STORE.list_workouts(user_id)
+    based_on_workout_id = STORE.get_latest_workout_id(user_id)
+    body_weights = STORE.list_body_weights(user_id)
+    try:
+        recommendation, usage, model = recommender.generate(
+            workouts, body_weights, EXERCISE_CATALOG
+        )
+    except recommender.RecommendationError as exc:
+        STORE.fail_recommendation(user_id, str(exc))
+        return None
+    except Exception as exc:  # noqa: BLE001
+        print(f"[miniapp] recommendation error for user {user_id}: {exc}")
+        STORE.fail_recommendation(user_id, "Внутренняя ошибка генерации рекомендации")
+        return None
+
+    return STORE.save_recommendation(
+        user_id,
+        based_on_workout_id,
+        len(workouts),
+        model,
+        recommendation,
+        usage.get("input_tokens"),
+        usage.get("output_tokens"),
+    )
+
+
+def trigger_recommendation_async(user_id: int) -> None:
+    """Regenerate the recommendation in the background (fire-and-forget).
+    No-op if a generation for this user is already running."""
+    if EXERCISE_CATALOG is None:
+        return
+
+    def _run() -> None:
+        lock = _user_recommendation_lock(user_id)
+        if not lock.acquire(blocking=False):
+            return  # a generation is already in flight for this user
+        try:
+            STORE.set_recommendation_pending(user_id)
+            _generate_and_store_recommendation(user_id)
+        finally:
+            lock.release()
+
+    threading.Thread(target=_run, name=f"recommend-{user_id}", daemon=True).start()
 
 
 def iter_watched_files() -> list[Path]:
@@ -265,6 +342,25 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.OK,
                 {"ok": True, "user": user, "entries": entries},
+                extra_headers=headers,
+            )
+            return
+
+        if path == "/api/recommendations/next":
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            self._send_json(
+                HTTPStatus.OK,
+                self._recommendation_response(user),
                 extra_headers=headers,
             )
             return
@@ -514,6 +610,8 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 {"ok": True, "created": created, "user": user, "workout": workout},
                 extra_headers=headers,
             )
+            if created:
+                trigger_recommendation_async(int(user["id"]))
             return
 
         if path == "/api/body-weights":
@@ -541,6 +639,65 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.CREATED if created else HTTPStatus.OK,
                 {"ok": True, "created": created, "user": user, "entry": entry},
+                extra_headers=headers,
+            )
+            return
+
+        if path == "/api/recommendations/refresh":
+            user, headers = self._resolve_current_user(allow_debug_fallback=True)
+            if user is None:
+                self._send_json(
+                    HTTPStatus.UNAUTHORIZED,
+                    {
+                        "ok": False,
+                        "reason": "No active session. Open Mini App from Telegram or enable debug user mode.",
+                    },
+                )
+                return
+
+            if EXERCISE_CATALOG is None:
+                self._send_json(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"ok": False, "reason": "Рекомендации недоступны: каталог упражнений не загружен"},
+                )
+                return
+
+            user_id = int(user["id"])
+            lock = _user_recommendation_lock(user_id)
+            if not lock.acquire(blocking=False):
+                # Already generating (e.g. triggered by a recent workout save).
+                payload = self._recommendation_response(user)
+                payload["status"] = "pending"
+                self._send_json(HTTPStatus.ACCEPTED, payload, extra_headers=headers)
+                return
+
+            try:
+                now = time.monotonic()
+                if now - _last_refresh_started.get(user_id, 0.0) < REFRESH_MIN_INTERVAL:
+                    payload = self._recommendation_response(user)
+                    payload["reason"] = "Слишком частый запрос, отдаю текущую рекомендацию"
+                    self._send_json(HTTPStatus.OK, payload, extra_headers=headers)
+                    return
+                _last_refresh_started[user_id] = now
+                STORE.set_recommendation_pending(user_id)
+                result = _generate_and_store_recommendation(user_id)
+            finally:
+                lock.release()
+
+            if result is None:
+                rec = STORE.get_recommendation(user_id)
+                reason = (rec or {}).get("error") or "Не удалось сгенерировать рекомендацию"
+                payload = {"ok": False, "user": user, "reason": reason}
+                if rec is not None:
+                    payload.update(rec)
+                self._send_json(HTTPStatus.BAD_GATEWAY, payload, extra_headers=headers)
+                return
+
+            latest = STORE.get_latest_workout_id(user_id)
+            stale = bool(result.get("based_on_workout_id") != latest)
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "user": user, "stale": stale, **result},
                 extra_headers=headers,
             )
             return
@@ -584,6 +741,7 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             {"ok": True, "user": user, "workout": workout},
             extra_headers=headers,
         )
+        trigger_recommendation_async(int(user["id"]))
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
@@ -638,6 +796,7 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             {"ok": True, "user": user, "workout": workout, "deleted": True},
             extra_headers=headers,
         )
+        trigger_recommendation_async(int(user["id"]))
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"[miniapp] {self.address_string()} - {format % args}")
@@ -650,6 +809,23 @@ class MiniAppHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "reason": "Invalid JSON body"})
             return None
+
+    def _recommendation_response(self, user: dict[str, Any]) -> dict[str, Any]:
+        user_id = int(user["id"])
+        rec = STORE.get_recommendation(user_id)
+        if rec is None:
+            return {
+                "ok": True,
+                "user": user,
+                "status": "none",
+                "recommendation": None,
+                "stale": False,
+            }
+        latest = STORE.get_latest_workout_id(user_id)
+        stale = bool(
+            rec.get("status") == "ready" and rec.get("based_on_workout_id") != latest
+        )
+        return {"ok": True, "user": user, "stale": stale, **rec}
 
     def _send_json(
         self,

@@ -73,6 +73,7 @@ jobs:
           scp -P "${VPS_PORT:-22}" \
             telegram_miniapp/server.py \
             telegram_miniapp/backend_store.py \
+            telegram_miniapp/recommender.py \
             "$VPS_USER@$VPS_HOST:$DEPLOY_BASE/app/"
           scp -P "${VPS_PORT:-22}" \
             telegram_miniapp/deploy/trainer-miniapp-backend.service \
@@ -86,7 +87,7 @@ jobs:
         run: |
           set -eu
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "\
-            chmod 644 '$DEPLOY_BASE/app/server.py' '$DEPLOY_BASE/app/backend_store.py' '/etc/systemd/system/$BACKEND_SERVICE' && \
+            chmod 644 '$DEPLOY_BASE/app/server.py' '$DEPLOY_BASE/app/backend_store.py' '$DEPLOY_BASE/app/recommender.py' '/etc/systemd/system/$BACKEND_SERVICE' && \
             test -f /etc/trainer-miniapp/backend.env && \
             systemctl daemon-reload && \
             systemctl enable --now '$BACKEND_SERVICE' && \
