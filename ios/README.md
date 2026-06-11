@@ -30,7 +30,7 @@ https://trainer.superbatonec.org
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-MINIAPP_DEV_MODE=1 python3 telegram_miniapp/dev_server.py
+MINIAPP_DEV_MODE=1 python3 backend/dev_server.py
 ```
 
 В iOS-приложении адрес backend можно поменять через шестерёнку на экране `Trainings`.

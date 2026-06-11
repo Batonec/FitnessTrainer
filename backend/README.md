@@ -17,11 +17,11 @@ Backend API на SQLite с сессиями для нативного iOS-кли
 
 ## Что входит в текущую систему
 
-- [telegram_miniapp/web](./web) — frontend Mini App
-- [telegram_miniapp/server.py](./server.py) — HTTP API, Telegram auth/session resolve, раздача статики
-- [telegram_miniapp/backend_store.py](./backend_store.py) — SQLite storage
-- [telegram_miniapp/bot.py](./bot.py) — Telegram-бот
-- [telegram_miniapp/dev_server.py](./dev_server.py) — локальный dev launcher с autoreload
+- [backend/web](./web) — frontend Mini App
+- [backend/server.py](./server.py) — HTTP API, Telegram auth/session resolve, раздача статики
+- [backend/backend_store.py](./backend_store.py) — SQLite storage
+- [backend/bot.py](./bot.py) — Telegram-бот
+- [backend/dev_server.py](./dev_server.py) — локальный dev launcher с autoreload
 - [tests](../tests) — unit, integration и browser e2e тесты
 
 ## Текущее поведение продукта с технической точки зрения
@@ -87,7 +87,7 @@ Messages API (structured outputs, чистый stdlib `urllib` — без SDK/ve
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-BOT_TOKEN=123456:ABCDEF python3 telegram_miniapp/server.py
+BOT_TOKEN=123456:ABCDEF python3 backend/server.py
 ```
 
 После запуска приложение доступно на:
@@ -113,7 +113,7 @@ http://127.0.0.1:8080/stub.html
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-BOT_TOKEN=123456:ABCDEF python3 telegram_miniapp/dev_server.py
+BOT_TOKEN=123456:ABCDEF python3 backend/dev_server.py
 ```
 
 Launcher:
@@ -126,7 +126,7 @@ Launcher:
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-BOT_TOKEN=123456:ABCDEF WEB_APP_URL=https://trainer-miniapp.example.com python3 telegram_miniapp/bot.py
+BOT_TOKEN=123456:ABCDEF WEB_APP_URL=https://trainer-miniapp.example.com python3 backend/bot.py
 ```
 
 Бот:
@@ -257,15 +257,15 @@ python3 -m venv .venv
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-./telegram_miniapp/deploy/deploy.sh web
+./backend/deploy/deploy.sh web
 ```
 
 Другие варианты:
 
 ```bash
-./telegram_miniapp/deploy/deploy.sh backend
-./telegram_miniapp/deploy/deploy.sh bot
-./telegram_miniapp/deploy/deploy.sh all
+./backend/deploy/deploy.sh backend
+./backend/deploy/deploy.sh bot
+./backend/deploy/deploy.sh all
 ```
 
 Текущие значения по умолчанию в deploy tooling:

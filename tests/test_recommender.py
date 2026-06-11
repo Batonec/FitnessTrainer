@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-import support  # noqa: F401 — adds telegram_miniapp to sys.path
+import support  # noqa: F401 — adds backend to sys.path
 from support import WEB_DIR
 
 import recommender

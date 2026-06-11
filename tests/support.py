@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-MINIAPP_DIR = ROOT_DIR / "telegram_miniapp"
+MINIAPP_DIR = ROOT_DIR / "backend"
 WEB_DIR = MINIAPP_DIR / "web"
 
 if str(MINIAPP_DIR) not in sys.path:

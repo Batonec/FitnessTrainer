@@ -2,7 +2,7 @@
 """Coach MCP — talk to your training data in Claude and debug recommendations.
 
 A thin read-only MCP server over the same SQLite database the Trainer mini app
-uses (``telegram_miniapp``). It reuses ``backend_store`` and ``recommender`` so
+uses (``backend``). It reuses ``backend_store`` and ``recommender`` so
 the recommendation debugging tools generate exactly what the backend would.
 
 Run (stdio, for local Claude Desktop):
@@ -14,7 +14,7 @@ Run (streamable-http, behind a Cloudflare tunnel like investor-mcp):
 Environment:
     ANTHROPIC_API_KEY        required for the generate/debug tools
     COACH_MCP_BACKEND_DIR    dir containing backend_store.py + recommender.py
-                             (default: ../telegram_miniapp; on the VPS set it to
+                             (default: ../backend; on the VPS set it to
                              /opt/trainer-miniapp/app)
     MINIAPP_DB_PATH          SQLite path (default: <backend_dir>/data/trainer.db)
     COACH_MCP_STATIC_DIR     dir holding data/exercises.json (default:
@@ -45,7 +45,7 @@ except Exception:  # noqa: BLE001 - dotenv is optional
 
 # --- locate and import the backend modules (backend_store + recommender) ------
 _BACKEND_DIR = os.getenv("COACH_MCP_BACKEND_DIR") or str(
-    Path(__file__).resolve().parent.parent / "telegram_miniapp"
+    Path(__file__).resolve().parent.parent / "backend"
 )
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)

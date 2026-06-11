@@ -12,7 +12,7 @@
 
 Технические детали окружения, запуска и деплоя лежат в:
 
-- [telegram_miniapp/README.md](./telegram_miniapp/README.md)
+- [backend/README.md](./backend/README.md)
 
 ## 2. Общая модель продукта
 
@@ -142,7 +142,7 @@
 
 Источник:
 
-- [telegram_miniapp/web/data/exercises.json](./telegram_miniapp/web/data/exercises.json)
+- [backend/web/data/exercises.json](./backend/web/data/exercises.json)
 
 Используется для:
 
@@ -699,9 +699,9 @@ Composer состоит из:
 
 Если документ и реализация разойдутся, для текущей версии источником истины считаются:
 
-- текущее поведение [telegram_miniapp/web/main.js](./telegram_miniapp/web/main.js);
-- API-контракт [telegram_miniapp/server.py](./telegram_miniapp/server.py);
-- правила нормализации и persistence в [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py);
+- текущее поведение [backend/web/main.js](./backend/web/main.js);
+- API-контракт [backend/server.py](./backend/server.py);
+- правила нормализации и persistence в [backend/backend_store.py](./backend/backend_store.py);
 - автотесты в [tests](./tests).
 
 Но целевое состояние процесса по-прежнему такое:

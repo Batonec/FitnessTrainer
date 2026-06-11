@@ -71,12 +71,12 @@ jobs:
           set -eu
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "mkdir -p '$DEPLOY_BASE/app'"
           scp -P "${VPS_PORT:-22}" \
-            telegram_miniapp/server.py \
-            telegram_miniapp/backend_store.py \
-            telegram_miniapp/recommender.py \
+            backend/server.py \
+            backend/backend_store.py \
+            backend/recommender.py \
             "$VPS_USER@$VPS_HOST:$DEPLOY_BASE/app/"
           scp -P "${VPS_PORT:-22}" \
-            telegram_miniapp/deploy/trainer-miniapp-backend.service \
+            backend/deploy/trainer-miniapp-backend.service \
             "$VPS_USER@$VPS_HOST:/etc/systemd/system/$BACKEND_SERVICE"
 
       - name: Restart backend service

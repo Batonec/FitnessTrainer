@@ -1,5 +1,5 @@
 [Unit]
-Description=Trainer Telegram Mini App Backend
+Description=Trainer Backend
 After=network-online.target
 Wants=network-online.target
 

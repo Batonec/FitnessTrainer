@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-import backend_store  # support (imported below) puts telegram_miniapp on sys.path
+import backend_store  # support (imported below) puts backend on sys.path
 from support import (
     JsonHttpClient,
     RunningMiniApp,

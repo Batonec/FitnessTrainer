@@ -15,14 +15,14 @@
 ## Навигация по документации
 
 - [BUSINESS_LOGIC.md](./BUSINESS_LOGIC.md) — продуктовая логика и инварианты
-- [telegram_miniapp/README.md](./telegram_miniapp/README.md) — технический README по Mini App, backend, env и деплою
-- [telegram_miniapp/web](./telegram_miniapp/web) — frontend
-- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — HTTP API и session/auth logic
-- [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py) — SQLite storage и нормализация данных
-- [telegram_miniapp/bot.py](./telegram_miniapp/bot.py) — Telegram-бот
+- [backend/README.md](./backend/README.md) — технический README по Mini App, backend, env и деплою
+- [backend/web](./backend/web) — frontend
+- [backend/server.py](./backend/server.py) — HTTP API и session/auth logic
+- [backend/backend_store.py](./backend/backend_store.py) — SQLite storage и нормализация данных
+- [backend/bot.py](./backend/bot.py) — Telegram-бот
 - [tests](./tests) — тестовый suite
-- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — deploy tooling
-- [telegram_miniapp/recommender.py](./telegram_miniapp/recommender.py) — «Совет тренера»: генерация рекомендации через Claude API
+- [backend/deploy](./backend/deploy) — deploy tooling
+- [backend/recommender.py](./backend/recommender.py) — «Совет тренера»: генерация рекомендации через Claude API
 - [ios](./ios) — нативный iOS-клиент (SwiftUI) + [бриф карточки «Совет тренера»](./ios/RECOMMENDATION_CARD_BRIEF.md)
 - [coach_mcp](./coach_mcp) — MCP-сервер: общение с данными тренировок в Claude и отладка рекомендаций
 
@@ -72,7 +72,7 @@
 
 - история тренировок — backend / SQLite;
 - записи веса тела — backend / SQLite;
-- справочник упражнений — [telegram_miniapp/web/data/exercises.json](./telegram_miniapp/web/data/exercises.json);
+- справочник упражнений — [backend/web/data/exercises.json](./backend/web/data/exercises.json);
 - черновик тренировки и некоторые UI-состояния — `localStorage`.
 
 `localStorage` не считается источником истины для уже сохранённых тренировок и веса тела.
@@ -84,20 +84,20 @@
 
 ## Коротко про архитектуру
 
-- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — API, session resolve (iOS fixed-user + debug), раздача каталога
-- [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py) — SQLite persistence и нормализация данных
-- [telegram_miniapp/recommender.py](./telegram_miniapp/recommender.py) — «Совет тренера» через Claude API
+- [backend/server.py](./backend/server.py) — API, session resolve (iOS fixed-user + debug), раздача каталога
+- [backend/backend_store.py](./backend/backend_store.py) — SQLite persistence и нормализация данных
+- [backend/recommender.py](./backend/recommender.py) — «Совет тренера» через Claude API
 - [ios](./ios) — нативный iOS-клиент (SwiftUI)
 - [coach_mcp](./coach_mcp) — MCP-сервер для общения с данными и отладки рекомендаций
 - [tests](./tests) — unit/integration тесты
-- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — deploy backend на VPS
+- [backend/deploy](./backend/deploy) — deploy backend на VPS
 - [.github/workflows](./.github/workflows) — CI и backend deploy
 
 ## Локальный запуск (backend)
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-MINIAPP_ALLOW_DEBUG_USER=1 python3 telegram_miniapp/server.py
+MINIAPP_ALLOW_DEBUG_USER=1 python3 backend/server.py
 ```
 
 API поднимается на `http://127.0.0.1:8080/`. iOS-клиент собирается из [ios/](./ios) в Xcode.
@@ -115,7 +115,7 @@ iOS-тесты — через Xcode (`xcodebuild test` по схеме `TrainerI
 
 Бэкенд деплоится на VPS — описание окружения, сервисов и flow в:
 
-- [telegram_miniapp/README.md](./telegram_miniapp/README.md)
+- [backend/README.md](./backend/README.md)
 
 ## GitHub Actions
 
@@ -144,5 +144,5 @@ iOS-тесты — через Xcode (`xcodebuild test` по схеме `TrainerI
 Если нужен именно продуктовый ответ “как это должно работать сейчас”, сначала смотри:
 
 1. [BUSINESS_LOGIC.md](./BUSINESS_LOGIC.md)
-2. [telegram_miniapp/web/main.js](./telegram_miniapp/web/main.js)
+2. [backend/web/main.js](./backend/web/main.js)
 3. [tests](./tests)

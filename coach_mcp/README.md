@@ -2,7 +2,7 @@
 
 Read-only MCP server over the Trainer mini-app data, plus tools to **debug the
 next-workout recommendations**. It reads the same SQLite database the backend
-uses (`telegram_miniapp`) and reuses `recommender.py`, so what you see here is
+uses (`backend`) and reuses `recommender.py`, so what you see here is
 exactly what the app's backend generates.
 
 Use it to chat with Claude as a "coach" about your training, and to inspect the
@@ -29,7 +29,7 @@ All tools accept an optional `user_id` (defaults to the configured user).
 | Var | Default | Notes |
 |-----|---------|-------|
 | `ANTHROPIC_API_KEY` | — | Required for `coach_debug_recommendation` / `coach_generate_recommendation` |
-| `COACH_MCP_BACKEND_DIR` | `../telegram_miniapp` | Dir with `backend_store.py` + `recommender.py`. On the VPS: `/opt/trainer-miniapp/app` |
+| `COACH_MCP_BACKEND_DIR` | `../backend` | Dir with `backend_store.py` + `recommender.py`. On the VPS: `/opt/trainer-miniapp/app` |
 | `MINIAPP_DB_PATH` | `<backend_dir>/data/trainer.db` | SQLite path. On the VPS: `/opt/trainer-miniapp/data/trainer.db` |
 | `COACH_MCP_STATIC_DIR` | `MINIAPP_STATIC_DIR` or `<backend_dir>/web` | Holds `data/exercises.json`. On the VPS: `/opt/trainer-miniapp/www` |
 | `COACH_MCP_USER_ID` | `MINIAPP_TELEGRAM_RECOVERY_USER_ID` or `3` | Which user to operate on |
