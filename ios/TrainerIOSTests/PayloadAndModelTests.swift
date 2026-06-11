@@ -2,6 +2,50 @@ import XCTest
 @testable import TrainerIOS
 
 final class PayloadAndModelTests: XCTestCase {
+    func testRecommendationResponseDecodesSnakeCaseContract() throws {
+        let json = #"""
+        {
+          "ok": true,
+          "status": "ready",
+          "stale": true,
+          "based_on_workout_count": 56,
+          "model": "claude-opus-4-8",
+          "error": null,
+          "recommendation": {
+            "focus": "Верх+низ",
+            "load_type": "medium",
+            "rationale": "После перерыва — средняя нагрузка.",
+            "exercises": [
+              {"exercise_id": 8, "name": "Жим ногами", "note": "мягкий вход",
+               "sets": [{"reps": 12, "weight": 90}, {"reps": 10, "weight": 90}]}
+            ]
+          }
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(RecommendationResponse.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.status, "ready")
+        XCTAssertEqual(decoded.stale, true)
+        XCTAssertEqual(decoded.basedOnWorkoutCount, 56)
+        XCTAssertEqual(decoded.model, "claude-opus-4-8")
+        XCTAssertNil(decoded.error)
+        let exercise = try XCTUnwrap(decoded.recommendation?.exercises.first)
+        XCTAssertEqual(decoded.recommendation?.loadType, "medium")
+        XCTAssertEqual(exercise.exerciseID, 8)
+        XCTAssertEqual(exercise.note, "мягкий вход")
+        XCTAssertEqual(exercise.sets.map(\.reps), [12, 10])
+        XCTAssertEqual(exercise.sets.first?.weight, 90)
+    }
+
+    func testRecommendationResponseDecodesEmptyState() throws {
+        let json = #"{"ok":true,"status":"none","recommendation":null,"stale":false}"#
+        let decoded = try JSONDecoder().decode(RecommendationResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.status, "none")
+        XCTAssertNil(decoded.recommendation)
+        XCTAssertEqual(decoded.stale, false)
+    }
+
     func testWorkoutPayloadMatchesBackendContractAndAssignsSequentialSetIndexes() throws {
         let draft = TestFixtures.draft(
             date: "2026-05-10",

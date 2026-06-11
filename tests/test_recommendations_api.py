@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+import tempfile
+import time
+import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
+
+import backend_store  # support (imported below) puts telegram_miniapp on sys.path
+from support import (
+    JsonHttpClient,
+    RunningMiniApp,
+    running_miniapp_server,
+    sample_workout_payload,
+    temporary_env,
+)
+
+
+FAKE_REC: dict[str, Any] = {
+    "focus": "Тест",
+    "load_type": "medium",
+    "rationale": "обоснование",
+    "exercises": [
+        {"exercise_id": 1, "name": "Bench Press", "note": "n", "sets": [{"reps": 12, "weight": 80}]}
+    ],
+}
+
+
+def _fake_generate(workouts, body_weights, catalog, **kwargs):  # noqa: ANN001
+    return FAKE_REC, {"input_tokens": 100, "output_tokens": 50}, "claude-test"
+
+
+class RecommendationsAPITests(unittest.TestCase):
+    @contextmanager
+    def _server(
+        self,
+        *,
+        auto_trigger: bool = False,
+        generate=None,
+        raises: str | None = None,
+    ) -> Iterator[RunningMiniApp]:
+        # Drop the manual-refresh debounce so sequential calls in a test don't race it.
+        with temporary_env({"RECOMMENDATION_REFRESH_MIN_INTERVAL": "0"}):
+            with running_miniapp_server() as running:
+                module = running.module
+                orig_generate = module.recommender.generate
+                orig_trigger = module.trigger_recommendation_async
+                try:
+                    if not auto_trigger:
+                        module.trigger_recommendation_async = lambda *a, **k: None
+                    if raises is not None:
+                        def boom(*a, **k):  # noqa: ANN001, ANN202
+                            raise module.recommender.RecommendationError(raises)
+                        module.recommender.generate = boom
+                    else:
+                        module.recommender.generate = generate or _fake_generate
+                    yield running
+                finally:
+                    module.recommender.generate = orig_generate
+                    module.trigger_recommendation_async = orig_trigger
+
+    def test_next_returns_none_without_recommendation(self) -> None:
+        with self._server() as running:
+            client = JsonHttpClient(running.base_url)
+            res = client.request_json("GET", "/api/recommendations/next")
+            self.assertEqual(res.status, 200)
+            self.assertEqual(res.payload["status"], "none")
+            self.assertIsNone(res.payload["recommendation"])
+            self.assertFalse(res.payload["stale"])
+
+    def test_refresh_generates_then_next_reads_cached_ready(self) -> None:
+        with self._server() as running:
+            client = JsonHttpClient(running.base_url)
+            client.request_json("POST", "/api/workouts", sample_workout_payload(client_id="w1"))
+
+            res = client.request_json("POST", "/api/recommendations/refresh")
+            self.assertEqual(res.status, 200)
+            self.assertEqual(res.payload["status"], "ready")
+            self.assertEqual(res.payload["recommendation"]["focus"], "Тест")
+            self.assertFalse(res.payload["stale"])
+
+            nxt = client.request_json("GET", "/api/recommendations/next")
+            self.assertEqual(nxt.payload["status"], "ready")
+            self.assertFalse(nxt.payload["stale"])
+            self.assertEqual(nxt.payload["recommendation"]["exercises"][0]["exercise_id"], 1)
+
+    def test_stale_flag_set_after_newer_workout(self) -> None:
+        with self._server() as running:  # auto_trigger off → recommendation won't regenerate
+            client = JsonHttpClient(running.base_url)
+            client.request_json(
+                "POST", "/api/workouts", sample_workout_payload(client_id="w1", workout_date="2026-03-20")
+            )
+            client.request_json("POST", "/api/recommendations/refresh")
+            client.request_json(
+                "POST", "/api/workouts", sample_workout_payload(client_id="w2", workout_date="2026-03-28")
+            )
+
+            nxt = client.request_json("GET", "/api/recommendations/next")
+            self.assertEqual(nxt.payload["status"], "ready")
+            self.assertTrue(nxt.payload["stale"])
+
+    def test_refresh_failure_returns_502_with_reason(self) -> None:
+        with self._server(raises="Claude API не ответил вовремя") as running:
+            client = JsonHttpClient(running.base_url)
+            client.request_json("POST", "/api/workouts", sample_workout_payload(client_id="w1"))
+            res = client.request_json("POST", "/api/recommendations/refresh")
+            self.assertEqual(res.status, 502)
+            self.assertFalse(res.payload["ok"])
+            self.assertIn("вовремя", res.payload["reason"])
+
+    def test_workout_save_auto_triggers_generation(self) -> None:
+        with self._server(auto_trigger=True) as running:
+            client = JsonHttpClient(running.base_url)
+            client.request_json("POST", "/api/workouts", sample_workout_payload(client_id="w1"))
+
+            status = None
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                status = client.request_json("GET", "/api/recommendations/next").payload.get("status")
+                if status == "ready":
+                    break
+                time.sleep(0.1)
+            self.assertEqual(status, "ready")
+
+
+class RecommendationStoreTests(unittest.TestCase):
+    def _store(self) -> tuple[backend_store.MiniAppStore, int]:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = backend_store.MiniAppStore(Path(tmp.name) / "trainer.db")
+        user = store.ensure_debug_user("rec-test-user")
+        return store, int(user["id"])
+
+    def test_recommendation_lifecycle(self) -> None:
+        store, uid = self._store()
+        self.assertIsNone(store.get_latest_workout_id(uid))
+        self.assertIsNone(store.get_recommendation(uid))
+
+        store.save_workout(uid, sample_workout_payload(client_id="w1", workout_date="2026-03-20"))
+        workout_id = store.get_latest_workout_id(uid)
+        self.assertIsNotNone(workout_id)
+
+        store.set_recommendation_pending(uid)
+        self.assertEqual(store.get_recommendation(uid)["status"], "pending")
+
+        row = store.save_recommendation(uid, workout_id, 1, "model-x", FAKE_REC, 10, 5)
+        self.assertEqual(row["status"], "ready")
+        self.assertEqual(row["based_on_workout_id"], workout_id)
+        self.assertEqual(row["recommendation"]["focus"], "Тест")
+        self.assertEqual(row["input_tokens"], 10)
+
+        store.fail_recommendation(uid, "boom")
+        failed = store.get_recommendation(uid)
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["error"], "boom")
+
+
+if __name__ == "__main__":
+    unittest.main()

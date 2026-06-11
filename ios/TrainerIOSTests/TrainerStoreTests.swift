@@ -14,6 +14,44 @@ final class TrainerStoreTests: XCTestCase {
         XCTAssertFalse(store.isWorkoutBuilderPresented)
     }
 
+    func testApplyRecommendationToDraftLoadsValidExercisesAndSwitchesTab() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.currentTab = .history
+        store.recommendation = RecommendationResponse(
+            ok: true,
+            status: "ready",
+            stale: false,
+            basedOnWorkoutCount: 10,
+            model: "claude-opus-4-8",
+            error: nil,
+            recommendation: RecommendationPayload(
+                focus: "Верх+низ",
+                loadType: "medium",
+                rationale: "...",
+                exercises: [
+                    RecommendedExercise(
+                        exerciseID: 8, name: "Жим ногами", note: "n",
+                        sets: [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 12, weight: 90)]
+                    ),
+                    RecommendedExercise(
+                        exerciseID: 999, name: "Выдумка", note: nil,
+                        sets: [RecommendedSet(reps: 5, weight: 5)]
+                    )
+                ]
+            )
+        )
+
+        store.applyRecommendationToDraft()
+
+        XCTAssertEqual(store.draft.exercises.map(\.exerciseID), [8])  // unknown id 999 dropped
+        XCTAssertEqual(store.draft.exercises.first?.exerciseName, "Жим ногами")
+        XCTAssertEqual(store.draft.exercises.first?.sets.count, 2)
+        XCTAssertEqual(store.draft.exercises.first?.sets.first?.weight, 90)
+        XCTAssertNil(store.draft.editingWorkoutID)
+        XCTAssertEqual(store.currentTab, .trainings)
+    }
+
     func testStoreMigratesLegacyLocalBackendURLToProduction() {
         let defaults = UserDefaults.isolatedTestDefaults()
         defaults.set("http://127.0.0.1:8080/", forKey: "trainer-ios-api-base-url-v1")

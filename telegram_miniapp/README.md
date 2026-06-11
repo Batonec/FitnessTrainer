@@ -54,8 +54,25 @@
 - `GET /api/body-weights`
 - `POST /api/body-weights`
 - `DELETE /api/body-weights/{id}`
+- `GET /api/recommendations/next`
+- `POST /api/recommendations/refresh`
 
 Для нативного iOS personal-build `POST /api/session/resolve` принимает `shell=ios` и `native_user_id=3`: backend выдаёт обычную `trainer_session` для уже существующего пользователя с этим `id`.
+
+## Совет тренера (LLM-рекомендация)
+
+`recommender.py` строит план следующей тренировки по истории пользователя через Claude
+Messages API (structured outputs, чистый stdlib `urllib` — без SDK/venv). Хранится одна
+строка на пользователя в таблице `recommendations` (статусы `none`/`pending`/`ready`/`failed`).
+
+- `GET /api/recommendations/next` — мгновенно отдаёт кэш (или `status: none`), не ждёт генерации; в ответе есть флаг `stale` (есть ли тренировка новее той, по которой считали).
+- `POST /api/recommendations/refresh` — синхронная форс-генерация (10–40 с), per-user lock + анти-дребезг.
+- После создания/изменения/удаления тренировки рекомендация перегенерируется в фоновом потоке.
+
+Формат рекомендации: `focus`, `load_type` (heavy/medium/light), развёрнутый `rationale`
+(почему именно такой план) и `exercises[]` с `exercise_id`/`name`/`note`/`sets[{reps,weight}]`.
+Требуется `ANTHROPIC_API_KEY`; без него генерация отвечает понятной ошибкой, остальные
+эндпоинты работают как прежде.
 
 ## Локальный запуск
 
@@ -176,6 +193,15 @@ Effort хранится в backend, проходит нормализацию в
 - `MINIAPP_SESSION_MAX_AGE`
 - `MINIAPP_COOKIE_SECURE`
 - `MINIAPP_TELEGRAM_RECOVERY_USER_ID`
+
+#### Совет тренера (LLM)
+
+- `ANTHROPIC_API_KEY` — ключ Claude API (обязателен для генерации рекомендаций)
+- `ANTHROPIC_MODEL` — модель, по умолчанию `claude-opus-4-8`
+- `ANTHROPIC_MAX_TOKENS` — лимит вывода, по умолчанию `2500`
+- `ANTHROPIC_TIMEOUT` — таймаут запроса к Claude в секундах, по умолчанию `90`
+- `RECOMMENDATION_HISTORY_LIMIT` — сколько последних тренировок отдавать модели, по умолчанию `20`
+- `RECOMMENDATION_REFRESH_MIN_INTERVAL` — анти-дребезг ручного refresh в секундах, по умолчанию `10`
 
 ### Для `bot.py`
 

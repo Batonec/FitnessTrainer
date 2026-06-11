@@ -22,6 +22,9 @@
 - [telegram_miniapp/bot.py](./telegram_miniapp/bot.py) — Telegram-бот
 - [tests](./tests) — тестовый suite
 - [telegram_miniapp/deploy](./telegram_miniapp/deploy) — deploy tooling
+- [telegram_miniapp/recommender.py](./telegram_miniapp/recommender.py) — «Совет тренера»: генерация рекомендации через Claude API
+- [ios](./ios) — нативный iOS-клиент (SwiftUI) + [бриф карточки «Совет тренера»](./ios/RECOMMENDATION_CARD_BRIEF.md)
+- [coach_mcp](./coach_mcp) — MCP-сервер: общение с данными тренировок в Claude и отладка рекомендаций
 
 ## Что умеет продукт сейчас
 
@@ -45,6 +48,8 @@
 - показывать прогресс по выбранному упражнению на экране `Progress`;
 - показывать отдельный экран `Weight` с графиком, inline-вводом и удалением записи по тапу на точку;
 - хранить тренировки и вес тела на backend, а не в `localStorage`;
+- предлагать «Совет тренера» — план следующей тренировки по истории, сгенерированный Claude (карточка вверху `Trainings` в iOS-клиенте; кэш + ручной refresh + авто-перегенерация после тренировки);
+- общаться с данными тренировок и отлаживать рекомендации в Claude через MCP-сервер `coach_mcp`;
 - прогоняться через CI и деплоиться на VPS после зелёных тестов.
 
 ## Текущий продуктовый UX в двух словах

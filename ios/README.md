@@ -98,3 +98,14 @@ xcodebuild \
 - `GET /api/body-weights`
 - `POST /api/body-weights`
 - `DELETE /api/body-weights/{id}`
+- `GET /api/recommendations/next` — кэш «Совета тренера» (мгновенно, не ждёт генерации)
+- `POST /api/recommendations/refresh` — форс-генерация рекомендации (синхронно, на отдельной 90-сек сессии)
+
+### «Совет тренера»
+
+Карточка `CoachCard` вверху TodayScreen показывает рекомендацию следующей тренировки
+(`focus`, нагрузка, упражнения с подходами и пояснениями, сворачиваемое «Почему так»).
+`GET /api/recommendations/next` читается после старта (вне 3-сек дедлайна `reload`);
+«Обновить» дёргает `POST /api/recommendations/refresh` (10–40 с, показывается оверлей);
+«Применить в план» переносит упражнения в черновик. Состояния: `none` / `pending` /
+`ready` (+ `stale`) / `failed`.

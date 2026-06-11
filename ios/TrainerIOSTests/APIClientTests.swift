@@ -53,6 +53,12 @@ final class APIClientTests: XCTestCase {
         protocolType.enqueue(json: bodyWeightMutationJSON(id: 3, deleted: true))
         _ = try await client.deleteBodyWeight(id: 3)
 
+        protocolType.enqueue(json: #"{"ok":true,"status":"none","recommendation":null,"stale":false}"#)
+        _ = try await client.fetchRecommendation()
+
+        protocolType.enqueue(json: recommendationJSON())
+        _ = try await client.refreshRecommendation()
+
         protocolType.enqueue(json: #"{"ok":true}"#)
         _ = try await client.logout()
 
@@ -66,6 +72,8 @@ final class APIClientTests: XCTestCase {
             "DELETE",
             "POST",
             "DELETE",
+            "GET",
+            "POST",
             "POST"
         ])
         XCTAssertEqual(protocolType.requests.compactMap(\.url?.path), [
@@ -78,8 +86,27 @@ final class APIClientTests: XCTestCase {
             "/api/workouts/10",
             "/api/body-weights",
             "/api/body-weights/3",
+            "/api/recommendations/next",
+            "/api/recommendations/refresh",
             "/api/session/logout"
         ])
+    }
+
+    func testRefreshRecommendationDecodesReadyPayload() async throws {
+        let client = makeClient()
+        protocolType.enqueue(json: recommendationJSON())
+
+        let response = try await client.refreshRecommendation()
+
+        XCTAssertEqual(response.status, "ready")
+        XCTAssertEqual(response.stale, false)
+        XCTAssertEqual(response.basedOnWorkoutCount, 56)
+        XCTAssertEqual(response.recommendation?.loadType, "medium")
+        XCTAssertEqual(response.recommendation?.exercises.first?.exerciseID, 8)
+        XCTAssertEqual(response.recommendation?.exercises.first?.note, "мягкий вход")
+        XCTAssertEqual(response.recommendation?.exercises.first?.sets.first?.weight, 90)
+        XCTAssertEqual(protocolType.requests.first?.httpMethod, "POST")
+        XCTAssertEqual(protocolType.requests.first?.url?.path, "/api/recommendations/refresh")
     }
 
     func testAPIClientSendsIOSSessionResolveAndBodyWeightPayloads() async throws {
@@ -154,6 +181,28 @@ final class APIClientTests: XCTestCase {
             """#
         )
         return "{\(fields.joined(separator: ","))}"
+    }
+
+    private func recommendationJSON() -> String {
+        #"""
+        {
+          "ok": true,
+          "status": "ready",
+          "stale": false,
+          "based_on_workout_count": 56,
+          "model": "claude-opus-4-8",
+          "error": null,
+          "recommendation": {
+            "focus": "Сбалансированная тренировка",
+            "load_type": "medium",
+            "rationale": "После перерыва беру среднюю нагрузку.",
+            "exercises": [
+              {"exercise_id": 8, "name": "Жим ногами", "note": "мягкий вход",
+               "sets": [{"reps": 12, "weight": 90}, {"reps": 12, "weight": 90}]}
+            ]
+          }
+        }
+        """#
     }
 
     private func bodyWeightMutationJSON(id: Int, created: Bool? = nil, deleted: Bool? = nil) -> String {
