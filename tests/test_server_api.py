@@ -114,6 +114,42 @@ class ServerApiTest(unittest.TestCase):
             self.assertEqual(browser_response.payload["user"]["auth_source"], "debug")
             self.assertEqual(browser_response.payload["user"]["debug_alias"], "browser-default")
 
+    def test_session_resolve_ios_can_bind_to_fixed_native_user_id(self) -> None:
+        with running_miniapp_server(allow_debug_user=False) as app:
+            app.module.STORE.ensure_debug_user("first-local-user", "First", "Local")
+            app.module.STORE.ensure_debug_user("second-local-user", "Second", "Local")
+            fixed_user = app.module.STORE.ensure_debug_user("ios-fixed-user", "Native", "Fixed")
+            self.assertEqual(fixed_user["id"], 3)
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {"shell": "ios", "native_user_id": 3},
+            )
+            workouts_response = client.request_json("GET", "/api/workouts")
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.payload["auth_mode"], "ios_fixed_user")
+            self.assertEqual(response.payload["user"]["id"], 3)
+            self.assertEqual(response.payload["user"]["display_name"], "Native Fixed")
+            self.assertIn("trainer_session=", response.headers.get("Set-Cookie", ""))
+            self.assertEqual(workouts_response.status, 200)
+            self.assertEqual(workouts_response.payload["user"]["id"], 3)
+
+    def test_session_resolve_ios_reports_missing_fixed_native_user(self) -> None:
+        with running_miniapp_server(allow_debug_user=False) as app:
+            client = JsonHttpClient(app.base_url)
+
+            response = client.request_json(
+                "POST",
+                "/api/session/resolve",
+                {"shell": "ios", "native_user_id": 3},
+            )
+
+            self.assertEqual(response.status, 401)
+            self.assertIn("user #3", response.payload["reason"])
+
     def test_session_resolve_telegram_shell_does_not_stick_to_debug_user(self) -> None:
         with running_miniapp_server(allow_debug_user=True) as app:
             client = JsonHttpClient(app.base_url)

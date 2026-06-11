@@ -144,6 +144,16 @@ def validate_init_data(init_data: str, bot_token: str) -> dict[str, object]:
     }
 
 
+def positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
 def debug_user_enabled() -> bool:
     return DEV_MODE or ALLOW_DEBUG_USER
 
@@ -279,6 +289,14 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             self._send_json(status, validation_result)
             return
 
+        if path == "/api/session/logout":
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True},
+                extra_headers={"Set-Cookie": self._clear_session_cookie()},
+            )
+            return
+
         if path == "/api/session/resolve":
             payload = self._read_json_body()
             if payload is None:
@@ -289,6 +307,45 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             is_telegram_shell = request_shell == "telegram"
             current_user, current_headers = self._resolve_current_user()
             has_init_data = bool(payload.get("initData"))
+            prefers_debug_session = request_shell in {"", "browser"}
+            native_user_id = positive_int(
+                payload.get("native_user_id")
+                or payload.get("nativeUserId")
+                or payload.get("nativeUserID")
+            )
+
+            if (
+                request_shell == "ios"
+                and native_user_id is not None
+                and not has_init_data
+                and not isinstance(unsafe_telegram_user, dict)
+            ):
+                if current_user is not None and int(current_user["id"]) == native_user_id:
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"ok": True, "user": current_user},
+                        extra_headers=current_headers,
+                    )
+                    return
+
+                user = STORE.get_user_by_id(native_user_id)
+                if user is None:
+                    self._send_json(
+                        HTTPStatus.UNAUTHORIZED,
+                        {
+                            "ok": False,
+                            "reason": f"Configured iOS user #{native_user_id} was not found.",
+                        },
+                    )
+                    return
+
+                headers = {"Set-Cookie": self._build_session_cookie(int(user["id"]))}
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, "user": user, "auth_mode": "ios_fixed_user"},
+                    extra_headers=headers,
+                )
+                return
 
             if (
                 not has_init_data
@@ -296,7 +353,9 @@ class MiniAppHandler(BaseHTTPRequestHandler):
                 and debug_user_enabled()
                 and not is_telegram_shell
             ):
-                if current_user is None or current_user.get("auth_source") != "debug":
+                if current_user is None or (
+                    prefers_debug_session and current_user.get("auth_source") != "debug"
+                ):
                     user = STORE.ensure_debug_user(
                         DEFAULT_DEBUG_USER_ALIAS,
                         DEFAULT_DEBUG_USER_FIRST_NAME,
@@ -676,6 +735,18 @@ class MiniAppHandler(BaseHTTPRequestHandler):
             "HttpOnly",
             "Path=/",
             f"Max-Age={SESSION_MAX_AGE_SECONDS}",
+            "SameSite=Lax",
+        ]
+        if COOKIE_SECURE:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def _clear_session_cookie(self) -> str:
+        parts = [
+            f"{SESSION_COOKIE_NAME}=",
+            "HttpOnly",
+            "Path=/",
+            "Max-Age=0",
             "SameSite=Lax",
         ]
         if COOKIE_SECURE:

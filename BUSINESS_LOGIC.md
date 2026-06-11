@@ -64,6 +64,17 @@
 - данные debug-user живут отдельно от Telegram-user;
 - browser debug не должен “залипать” на Telegram-shell.
 
+### 3.5. Native iOS fixed user
+
+Текущий нативный iOS-клиент работает без внешней авторизации:
+
+- iOS отправляет `shell=ios` и `native_user_id=3` в `POST /api/session/resolve`;
+- backend находит пользователя с таким `id`;
+- backend выдаёт тот же `trainer_session`, что и Telegram Mini App;
+- дальнейшие workout/body-weight endpoints не различают транспорт и работают по текущему `user_id`.
+
+Это сознательный personal-build режим. Он не предназначен для публичного multi-user доступа.
+
 ## 4. Основные сущности
 
 ### 4.1. Упражнение

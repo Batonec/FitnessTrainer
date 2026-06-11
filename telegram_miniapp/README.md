@@ -45,6 +45,7 @@
 - `GET /api/health`
 - `GET /api/dev/version`
 - `POST /api/session/resolve`
+- `POST /api/session/logout`
 - `POST /api/telegram/auth`
 - `GET /api/workouts`
 - `POST /api/workouts`
@@ -53,6 +54,8 @@
 - `GET /api/body-weights`
 - `POST /api/body-weights`
 - `DELETE /api/body-weights/{id}`
+
+Для нативного iOS personal-build `POST /api/session/resolve` принимает `shell=ios` и `native_user_id=3`: backend выдаёт обычную `trainer_session` для уже существующего пользователя с этим `id`.
 
 ## Локальный запуск
 
