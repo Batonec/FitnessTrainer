@@ -19,7 +19,7 @@ from typing import Any, Iterator
 from urllib.parse import urlencode
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 MINIAPP_DIR = ROOT_DIR / "backend"
 WEB_DIR = MINIAPP_DIR / "web"
 
