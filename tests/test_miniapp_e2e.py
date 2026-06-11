@@ -1012,6 +1012,9 @@ class MiniAppE2ETest(unittest.TestCase):
 
         self.open_app()
         self.page.locator('[data-action="switch-tab"][data-tab="body"]').click()
+        # Pin the chart to the "All" range so the March seed entry stays in view
+        # regardless of the real wall-clock date (default 30D window otherwise rots).
+        self.page.locator('[data-action="select-body-weight-range"][data-range="ALL"]').click()
         expect(self.page.locator(".body-weight-chart-wrap")).to_be_visible()
 
         entry_id = self.page.evaluate("window.__trainerMiniAppTestApi.getBodyWeightEntries()[0].id")
@@ -1529,6 +1532,9 @@ class MiniAppE2ETest(unittest.TestCase):
         self.open_app()
 
         self.page.locator('[data-action="switch-tab"][data-tab="progress"]').click()
+        # Pin to the "All" range so the March seed workouts stay in view regardless
+        # of the real wall-clock date (the default 30D window otherwise rots over time).
+        self.page.locator('[data-action="select-range"][data-range="ALL"]').click()
         self.page.locator("#progress-exercise").select_option("16")
 
         expect(self.page.locator(".topbar-title")).to_have_text("Progress")
@@ -1536,7 +1542,7 @@ class MiniAppE2ETest(unittest.TestCase):
         expect(self.page.locator("#progress-exercise")).to_have_value("16")
         expect(self.page.locator(".progress-panel")).to_contain_text("Разгибания ног")
         expect(self.page.locator(".progress-summary-grid")).to_contain_text("Изменение")
-        expect(self.page.locator(".progress-summary-grid")).to_contain_text("+10 кг / +2 повт.")
+        expect(self.page.locator(".progress-summary-grid")).to_contain_text("+30 кг / +4 повт.")
         expect(self.page.locator(".progress-chart")).to_be_visible()
 
     def test_topbar_shows_current_user_id_badge(self) -> None:
