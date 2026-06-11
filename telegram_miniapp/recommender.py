@@ -25,7 +25,7 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
-DEFAULT_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "2000"))
+DEFAULT_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "2500"))
 DEFAULT_HISTORY_LIMIT = int(os.getenv("RECOMMENDATION_HISTORY_LIMIT", "20"))
 DEFAULT_TIMEOUT = float(os.getenv("ANTHROPIC_TIMEOUT", "90"))
 
@@ -145,7 +145,15 @@ def _build_system_prompt(catalog: list[dict[str, Any]]) -> str:
         "- Обычно 4–6 упражнений по 3–4 подхода; вес — реалистичный, исходя из "
         "недавних рабочих весов пользователя (не выдумывай резких скачков).\n"
         "- Все веса в килограммах. Пиши на русском.\n\n"
-        "В rationale кратко (1–3 предложения) объясни логику выбора. "
+        "Текстовые пояснения:\n"
+        "- В поле rationale дай развёрнутое объяснение (несколько предложений): "
+        "почему выбран именно такой состав и нагрузка, что в истории на это "
+        "повлияло, и почему НЕ выбран другой вариант. Пиши понятно, по делу, "
+        "обращайся к пользователю на «ты».\n"
+        "- В поле note у каждого упражнения дай короткое (одна фраза) обоснование "
+        "именно этого выбора: почему такой вес и повторы относительно прошлого "
+        "раза (например: «+2.5 кг — в прошлый раз все подходы дались легко» или "
+        "«оставил вес — было тяжело»).\n\n"
         "Отвечай строго в заданной JSON-схеме, без какого-либо текста вне JSON."
     )
 
@@ -192,7 +200,11 @@ def _build_schema(catalog: list[dict[str, Any]]) -> dict[str, Any]:
             "load_type": {"type": "string", "enum": list(ALLOWED_LOAD_TYPES)},
             "rationale": {
                 "type": "string",
-                "description": "1–3 предложения с обоснованием на русском",
+                "description": (
+                    "Развёрнутое объяснение логики тренировки на русском: почему "
+                    "такой состав и нагрузка, что в истории на это повлияло и "
+                    "почему не выбран другой вариант"
+                ),
             },
             "exercises": {
                 "type": "array",
@@ -201,6 +213,13 @@ def _build_schema(catalog: list[dict[str, Any]]) -> dict[str, Any]:
                     "properties": {
                         "exercise_id": {"type": "integer", "enum": exercise_ids},
                         "name": {"type": "string"},
+                        "note": {
+                            "type": "string",
+                            "description": (
+                                "Короткое (одна фраза) обоснование выбора веса/повторов "
+                                "для этого упражнения относительно прошлого раза"
+                            ),
+                        },
                         "sets": {
                             "type": "array",
                             "items": {
@@ -214,7 +233,7 @@ def _build_schema(catalog: list[dict[str, Any]]) -> dict[str, Any]:
                             },
                         },
                     },
-                    "required": ["exercise_id", "name", "sets"],
+                    "required": ["exercise_id", "name", "note", "sets"],
                     "additionalProperties": False,
                 },
             },
@@ -341,6 +360,7 @@ def _validate(raw: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, A
                 "exercise_id": exercise_id,
                 # Trust the catalog name over whatever the model echoed back.
                 "name": names_by_id.get(exercise_id, str(exercise.get("name", "")).strip()),
+                "note": str(exercise.get("note", "")).strip(),
                 "sets": sets_out,
             }
         )
