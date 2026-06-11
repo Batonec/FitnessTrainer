@@ -740,6 +740,372 @@ private struct MainShellView: View {
 
 // MARK: - Today screen
 
+// MARK: - Coach recommendation card ("Совет тренера")
+
+struct CoachCard: View {
+    @EnvironmentObject private var store: TrainerStore
+    @State private var expanded = false
+
+    var body: some View {
+        if let rec = store.recommendation {
+            card(for: rec)
+        }
+    }
+
+    @ViewBuilder
+    private func card(for rec: RecommendationResponse) -> some View {
+        let status = rec.status ?? "none"
+        let busy = store.isRefreshingRecommendation
+        if let payload = rec.recommendation, status != "failed" {
+            readyCard(rec, payload: payload, dimmed: busy || status == "pending")
+        } else if busy || status == "pending" {
+            pendingCard
+        } else if status == "failed" {
+            failedCard(rec)
+        } else {
+            noneCard
+        }
+    }
+
+    // MARK: ready
+
+    private func readyCard(_ rec: RecommendationResponse, payload: RecommendationPayload, dimmed: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if rec.stale == true && !dimmed {
+                staleRibbon
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                header(basedOn: rec.basedOnWorkoutCount)
+
+                Text(payload.focus)
+                    .font(.jbm(18, weight: .bold))
+                    .tracking(-0.4)
+                    .foregroundStyle(DesignPalette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 11)
+
+                loadChipView(payload.loadType)
+                    .padding(.top, 11)
+
+                VStack(spacing: 0) {
+                    ForEach(payload.exercises) { exerciseRow($0) }
+                }
+                .padding(.top, 14)
+
+                rationaleToggle(payload.rationale)
+                    .padding(.top, 4)
+
+                actions
+                    .padding(.top, 16)
+            }
+            .padding(16)
+            .opacity(dimmed ? 0.4 : 1)
+        }
+        .liquidGlass(radius: 26)
+        .overlay { if dimmed { pendingOverlay } }
+    }
+
+    private var staleRibbon: some View {
+        Button {
+            Task { await store.refreshRecommendation() }
+        } label: {
+            HStack(spacing: 8) {
+                Circle().fill(DesignPalette.warn).frame(width: 6, height: 6)
+                Text("Есть тренировка новее, чем эта рекомендация")
+                    .font(.jbm(11.5, weight: .semibold))
+                    .foregroundStyle(DesignPalette.warn)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
+                    Text("Обновить").font(.jbm(11.5, weight: .bold))
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(DesignPalette.warn)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(DesignPalette.warn.opacity(0.12))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func exerciseRow(_ ex: RecommendedExercise) -> some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(DesignPalette.ink.opacity(0.07)).frame(height: 0.5)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ex.name)
+                        .font(.jbm(14, weight: .semibold))
+                        .tracking(-0.2)
+                        .foregroundStyle(DesignPalette.ink)
+                    if let note = ex.note, !note.isEmpty {
+                        Text(note)
+                            .font(.jbm(10.5, weight: .medium))
+                            .foregroundStyle(DesignPalette.ink3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(formatSets(ex.sets))
+                    .font(.jbm(12.5, weight: .bold))
+                    .tracking(-0.2)
+                    .foregroundStyle(DesignPalette.ink)
+                    .monospacedDigit()
+                    .fixedSize()
+            }
+            .padding(.vertical, 9)
+        }
+    }
+
+    private func rationaleToggle(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle().fill(DesignPalette.ink.opacity(0.07)).frame(height: 0.5)
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) { expanded.toggle() }
+            } label: {
+                HStack {
+                    HStack(spacing: 7) {
+                        Image(systemName: "questionmark.circle").font(.system(size: 13)).foregroundStyle(DesignPalette.ink3)
+                        Text("Почему так")
+                            .font(.jbm(10.5, weight: .semibold))
+                            .tracking(0.6)
+                            .textCase(.uppercase)
+                            .foregroundStyle(DesignPalette.ink2)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DesignPalette.ink3)
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                Text(text)
+                    .font(.jbm(12))
+                    .foregroundStyle(DesignPalette.ink2)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await store.refreshRecommendation() }
+            } label: {
+                HStack(spacing: 8) {
+                    if store.isRefreshingRecommendation {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 14, weight: .semibold))
+                    }
+                    Text("Обновить").font(.jbm(13.5, weight: .semibold))
+                }
+                .foregroundStyle(store.isRefreshingRecommendation ? DesignPalette.ink4 : DesignPalette.ink2)
+                .frame(height: 46)
+                .padding(.horizontal, 16)
+                .chipBackground()
+            }
+            .buttonStyle(.plain)
+            .disabled(store.isRefreshingRecommendation)
+
+            Button {
+                store.applyRecommendationToDraft()
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "text.badge.plus").font(.system(size: 16, weight: .semibold))
+                    Text("Применить в план").font(.jbm(14.5, weight: .bold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(DesignPalette.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var pendingOverlay: some View {
+        HStack(spacing: 11) {
+            ProgressView().tint(DesignPalette.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("ИИ обновляет план…").font(.jbm(13.5, weight: .bold)).foregroundStyle(DesignPalette.ink)
+                Text("обычно 15–20 секунд").font(.jbm(10.5)).foregroundStyle(DesignPalette.ink3)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .chipBackground()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: pending (no prior payload)
+
+    private var pendingCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(basedOn: nil)
+            HStack(spacing: 11) {
+                ProgressView().tint(DesignPalette.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("ИИ составляет план…").font(.jbm(13.5, weight: .bold)).foregroundStyle(DesignPalette.ink)
+                    Text("обычно 15–20 секунд").font(.jbm(10.5)).foregroundStyle(DesignPalette.ink3)
+                }
+            }
+            .padding(.top, 16)
+        }
+        .padding(16)
+        .liquidGlass(radius: 26)
+    }
+
+    // MARK: none / empty
+
+    private var noneCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(basedOn: nil)
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle().fill(DesignPalette.accent.opacity(0.12)).frame(width: 52, height: 52)
+                        .overlay(Circle().stroke(DesignPalette.accent.opacity(0.20), lineWidth: 0.5))
+                    Image(systemName: "sparkles").font(.system(size: 22)).foregroundStyle(DesignPalette.accent)
+                }
+                .padding(.bottom, 14)
+                Text("Совет ещё не сгенерирован")
+                    .font(.jbm(15, weight: .bold)).tracking(-0.3)
+                    .foregroundStyle(DesignPalette.ink).multilineTextAlignment(.center)
+                Text("Построю план следующей тренировки по твоей истории — с весами, повторами и обоснованием.")
+                    .font(.jbm(12)).foregroundStyle(DesignPalette.ink3)
+                    .multilineTextAlignment(.center).lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+                Button {
+                    Task { await store.refreshRecommendation() }
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "sparkles").font(.system(size: 16, weight: .semibold))
+                        Text("Сгенерировать совет").font(.jbm(14.5, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 48)
+                    .background(DesignPalette.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 16)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 14)
+            .padding(.horizontal, 6)
+        }
+        .padding(16)
+        .liquidGlass(radius: 26)
+    }
+
+    // MARK: failed
+
+    private func failedCard(_ rec: RecommendationResponse) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(basedOn: nil)
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle().fill(DesignPalette.bad.opacity(0.10)).frame(width: 40, height: 40)
+                        .overlay(Circle().stroke(DesignPalette.bad.opacity(0.22), lineWidth: 0.5))
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 18)).foregroundStyle(DesignPalette.bad)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Не удалось обновить совет")
+                        .font(.jbm(14.5, weight: .bold)).tracking(-0.3).foregroundStyle(DesignPalette.ink)
+                    Text(rec.error ?? "Попробуй ещё раз.")
+                        .font(.jbm(12)).foregroundStyle(DesignPalette.ink3)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 14)
+            Button {
+                Task { await store.refreshRecommendation() }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 14, weight: .semibold))
+                    Text("Повторить").font(.jbm(14, weight: .bold))
+                }
+                .foregroundStyle(DesignPalette.ink2)
+                .frame(maxWidth: .infinity).frame(height: 46)
+                .background(DesignPalette.ink.opacity(0.05), in: Capsule())
+                .overlay(Capsule().stroke(DesignPalette.ink.opacity(0.10), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 16)
+        }
+        .padding(16)
+        .liquidGlass(radius: 26)
+    }
+
+    // MARK: shared bits
+
+    private func header(basedOn: Int?) -> some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles").font(.system(size: 14)).foregroundStyle(DesignPalette.accent)
+                Text("Совет тренера")
+                    .font(.jbm(10.5, weight: .semibold)).tracking(0.6)
+                    .textCase(.uppercase).foregroundStyle(DesignPalette.ink)
+            }
+            Spacer()
+            if let basedOn {
+                Text("по \(basedOn) трен.")
+                    .font(.jbm(10.5, weight: .semibold))
+                    .foregroundStyle(DesignPalette.ink4)
+            }
+        }
+    }
+
+    private func loadChipView(_ type: String) -> some View {
+        let chip = loadChip(type)
+        return HStack(spacing: 6) {
+            Circle().fill(chip.color).frame(width: 6, height: 6)
+            Text("\(chip.label) нагрузка")
+                .font(.jbm(10, weight: .bold)).tracking(0.6)
+                .textCase(.uppercase).foregroundStyle(chip.color)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(chip.color.opacity(0.13), in: Capsule())
+        .overlay(Capsule().stroke(chip.color.opacity(0.24), lineWidth: 0.5))
+    }
+
+    private func loadChip(_ type: String) -> (label: String, color: Color) {
+        switch type {
+        case "heavy": return ("Тяжёлая", DesignPalette.bad)
+        case "light": return ("Лёгкая", DesignPalette.ok)
+        default: return ("Средняя", DesignPalette.warn)
+        }
+    }
+
+    private func formatWeight(_ w: Double) -> String {
+        w == w.rounded() ? String(Int(w)) : String(format: "%g", w)
+    }
+
+    private func formatSets(_ sets: [RecommendedSet]) -> String {
+        guard !sets.isEmpty else { return "" }
+        let weights = sets.map(\.weight)
+        let reps = sets.map(\.reps)
+        if Set(weights).count == 1 {
+            let w = formatWeight(weights[0])
+            if Set(reps).count == 1 {
+                return "\(w) кг × \(reps[0]) × \(sets.count)"
+            }
+            return "\(w) кг × " + reps.map(String.init).joined(separator: ", ")
+        }
+        return sets.map { "\(formatWeight($0.weight))×\($0.reps)" }.joined(separator: ", ")
+    }
+}
+
 private struct TodayScreen: View {
     @EnvironmentObject private var store: TrainerStore
     var openSettings: () -> Void
@@ -762,6 +1128,10 @@ private struct TodayScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 topPillsRow
+
+                if store.draft.editingWorkoutID == nil {
+                    CoachCard()
+                }
 
                 if store.draft.editingWorkoutID != nil {
                     sectionHeader("Редактируем", right: sessionSummary)

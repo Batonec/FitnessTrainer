@@ -56,6 +56,17 @@ final class APIClient {
         return URLSession(configuration: config)
     }()
 
+    /// Long-running session for the recommendation refresh, which blocks server-side
+    /// on a 10–40s Claude generation. Pass it into a dedicated APIClient instance
+    /// so it never touches the aggressive 3s default used by the rest of the app.
+    static let longRunningSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 90
+        config.timeoutIntervalForResource = 120
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
     func resolveSession() async throws -> SessionResolveResponse {
         try await post(
             "/api/session/resolve",
@@ -100,6 +111,16 @@ final class APIClient {
 
     func deleteBodyWeight(id: Int) async throws -> BodyWeightMutationResponse {
         try await delete("/api/body-weights/\(id)")
+    }
+
+    func fetchRecommendation() async throws -> RecommendationResponse {
+        try await get("/api/recommendations/next")
+    }
+
+    /// Force-regenerate. Synchronous on the server (10–40s); construct this client
+    /// with `APIClient.longRunningSession` so the call isn't cut at 3s.
+    func refreshRecommendation() async throws -> RecommendationResponse {
+        try await request("/api/recommendations/refresh", method: "POST", body: Optional<Data>.none)
     }
 
     private func get<Response: Decodable>(_ path: String) async throws -> Response {

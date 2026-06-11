@@ -256,6 +256,61 @@ struct APIReasonResponse: Codable {
     var reason: String?
 }
 
+// MARK: - Coach recommendation ("Совет тренера")
+
+/// Response of GET /api/recommendations/next and POST /api/recommendations/refresh.
+/// Decoding is intentionally lenient (no enums, optionals) so an unexpected field
+/// never discards the whole payload.
+struct RecommendationResponse: Codable {
+    var ok: Bool?
+    var status: String?            // none | pending | ready | failed
+    var stale: Bool?
+    var basedOnWorkoutCount: Int?
+    var model: String?
+    var error: String?
+    var recommendation: RecommendationPayload?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, status, stale, model, error, recommendation
+        case basedOnWorkoutCount = "based_on_workout_count"
+    }
+}
+
+struct RecommendationPayload: Codable, Hashable {
+    var focus: String
+    var loadType: String
+    var rationale: String
+    var exercises: [RecommendedExercise]
+
+    enum CodingKeys: String, CodingKey {
+        case focus
+        case loadType = "load_type"
+        case rationale
+        case exercises
+    }
+}
+
+struct RecommendedExercise: Codable, Hashable, Identifiable {
+    var exerciseID: Int
+    var name: String
+    var note: String?
+    var sets: [RecommendedSet]
+
+    var id: Int { exerciseID }
+
+    enum CodingKeys: String, CodingKey {
+        case exerciseID = "exercise_id"
+        case name
+        case note
+        case sets
+    }
+}
+
+struct RecommendedSet: Codable, Hashable {
+    var reps: Int
+    var weight: Double
+}
+
 struct DraftWorkout: Codable, Hashable {
     var workoutDate: String
     var exercises: [DraftExercise]

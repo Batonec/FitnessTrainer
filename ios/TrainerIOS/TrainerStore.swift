@@ -41,6 +41,9 @@ final class TrainerStore: ObservableObject {
     @Published var bodyWeightValue: String = ""
     @Published var toast: String?
 
+    @Published var recommendation: RecommendationResponse?
+    @Published var isRefreshingRecommendation = false
+
     private let defaults: UserDefaults
     private var toastTask: Task<Void, Never>?
 
@@ -279,6 +282,71 @@ final class TrainerStore: ObservableObject {
         }
     }
 
+    // MARK: - Coach recommendation
+
+    /// Instant cached read. Runs after boot reaches `.loaded`, outside the 3s
+    /// reload deadline. Failures are silent — we keep whatever we already had.
+    func loadRecommendation() async {
+        do {
+            recommendation = try await APIClient(baseURLString: apiBaseURLString).fetchRecommendation()
+        } catch {
+            // ignore — the card just keeps its previous content (or stays hidden)
+        }
+    }
+
+    /// Force a new recommendation. Synchronous on the server (10–40s), so it runs
+    /// on the long-running session and shows the pending overlay meanwhile.
+    func refreshRecommendation() async {
+        guard !isRefreshingRecommendation else { return }
+        isRefreshingRecommendation = true
+        defer { isRefreshingRecommendation = false }
+        do {
+            let response = try await APIClient(
+                baseURLString: apiBaseURLString,
+                session: APIClient.longRunningSession
+            ).refreshRecommendation()
+            recommendation = response
+            if response.status == "ready" {
+                showToast("Совет обновлён")
+            }
+        } catch {
+            recommendation = RecommendationResponse(
+                ok: false,
+                status: "failed",
+                stale: false,
+                basedOnWorkoutCount: recommendation?.basedOnWorkoutCount,
+                model: recommendation?.model,
+                error: error.localizedDescription,
+                recommendation: recommendation?.recommendation
+            )
+            showToast(error.localizedDescription)
+        }
+    }
+
+    /// Load the recommended exercises into the draft plan. Unknown catalog ids are
+    /// dropped by `ensureDraftExerciseDefinitions` (server already validates, so
+    /// there shouldn't be any).
+    func applyRecommendationToDraft() {
+        guard let payload = recommendation?.recommendation, !payload.exercises.isEmpty else { return }
+        draft = DraftWorkout(
+            workoutDate: DateTools.localTodayISO(),
+            exercises: payload.exercises.map { exercise in
+                DraftExercise(
+                    exerciseID: exercise.exerciseID,
+                    exerciseName: exercise.name,
+                    sets: exercise.sets.map {
+                        DraftSet(reps: $0.reps, weight: $0.weight, effort: nil, notes: nil)
+                    }
+                )
+            },
+            editingWorkoutID: nil,
+            editingClientID: nil
+        )
+        ensureDraftExerciseDefinitions()
+        currentTab = .trainings
+        showToast("План применён")
+    }
+
     func addPlannedSet(exerciseID: Int) {
         guard let exercise = exerciseDefinition(id: exerciseID) else { return }
         let currentSets = draft.exercises.first(where: { $0.exerciseID == exerciseID })?.sets.count ?? 0
@@ -422,6 +490,9 @@ final class TrainerStore: ObservableObject {
         if showSuccess {
             showToast("Данные обновлены")
         }
+        // Fetch the coach recommendation off the boot path: a new unstructured Task
+        // so the 3s reload deadline (which cancels the boot work task) never touches it.
+        Task { [weak self] in await self?.loadRecommendation() }
     }
 
     private func handleLoadError(_ error: Error) {
