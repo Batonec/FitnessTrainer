@@ -16,9 +16,7 @@ jobs:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      web: ${{ steps.filter.outputs.web }}
       backend: ${{ steps.filter.outputs.backend }}
-      bot: ${{ steps.filter.outputs.bot }}
 
     steps:
       - name: Check out repository
@@ -57,9 +55,7 @@ jobs:
             fi
           }
 
-          echo "web=$(has_match '^(telegram_miniapp/web/|\.github/workflows/deploy-web\.yml$)')" >> "$GITHUB_OUTPUT"
           echo "backend=$(has_match '^(telegram_miniapp/server\.py$|telegram_miniapp/backend_store\.py$|telegram_miniapp/recommender\.py$|telegram_miniapp/deploy/trainer-miniapp-backend\.service$|\.github/workflows/deploy-backend\.yml$)')" >> "$GITHUB_OUTPUT"
-          echo "bot=$(has_match '^(telegram_miniapp/bot\.py$|telegram_miniapp/deploy/trainer-miniapp-bot\.service$|\.github/workflows/deploy-bot\.yml$)')" >> "$GITHUB_OUTPUT"
 
   test:
     name: Run test suite
@@ -76,25 +72,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Install Playwright browser
-        run: python -m playwright install --with-deps chromium
-
       - name: Run automated tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
-
-  deploy-web:
-    name: Deploy web after tests
-    needs:
-      - changes
-      - test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.web == 'true'
-    uses: ./.github/workflows/deploy-web.yml
-    secrets: inherit
 
   deploy-backend:
     name: Deploy backend after tests
@@ -103,13 +82,4 @@ jobs:
       - test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.backend == 'true'
     uses: ./.github/workflows/deploy-backend.yml
-    secrets: inherit
-
-  deploy-bot:
-    name: Deploy bot after tests
-    needs:
-      - changes
-      - test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.bot == 'true'
-    uses: ./.github/workflows/deploy-bot.yml
     secrets: inherit

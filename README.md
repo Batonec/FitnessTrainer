@@ -77,62 +77,43 @@
 
 `localStorage` не считается источником истины для уже сохранённых тренировок и веса тела.
 
+> **Веб-мини-апп и Telegram-бот удалены** (июнь 2026): теперь продукт — это backend API
+> + нативный iOS-клиент. Сохранился только бэкенд (`server.py`/`backend_store.py`/
+> `recommender.py`), его база и каталог упражнений (`web/data/exercises.json`, отдаётся iOS
+> по `/data/exercises.json`).
+
 ## Коротко про архитектуру
 
-- [telegram_miniapp/web](./telegram_miniapp/web) — основной frontend Mini App
-- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — API, session resolve, Telegram auth, раздача статики
+- [telegram_miniapp/server.py](./telegram_miniapp/server.py) — API, session resolve (iOS fixed-user + debug), раздача каталога
 - [telegram_miniapp/backend_store.py](./telegram_miniapp/backend_store.py) — SQLite persistence и нормализация данных
-- [telegram_miniapp/bot.py](./telegram_miniapp/bot.py) — Telegram-бот на long polling
-- [tests](./tests) — unit, integration и browser e2e тесты
-- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — ручной deploy на VPS
-- [.github/workflows](./.github/workflows) — CI и deploy pipelines
+- [telegram_miniapp/recommender.py](./telegram_miniapp/recommender.py) — «Совет тренера» через Claude API
+- [ios](./ios) — нативный iOS-клиент (SwiftUI)
+- [coach_mcp](./coach_mcp) — MCP-сервер для общения с данными и отладки рекомендаций
+- [tests](./tests) — unit/integration тесты
+- [telegram_miniapp/deploy](./telegram_miniapp/deploy) — deploy backend на VPS
+- [.github/workflows](./.github/workflows) — CI и backend deploy
 
-## Локальный запуск
-
-Быстрый старт:
+## Локальный запуск (backend)
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
-python3 telegram_miniapp/dev_server.py
+MINIAPP_ALLOW_DEBUG_USER=1 python3 telegram_miniapp/server.py
 ```
 
-После этого приложение доступно на:
-
-```text
-http://127.0.0.1:8080/
-```
-
-В браузере без Telegram сервер автоматически выдаёт debug-user, если debug-режим разрешён переменными окружения.
+API поднимается на `http://127.0.0.1:8080/`. iOS-клиент собирается из [ios/](./ios) в Xcode.
 
 ## Тесты
-
-Быстрый запуск:
 
 ```bash
 cd /Users/batonec/AndroidStudioProjects/Trainer
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Полный запуск с browser e2e:
-
-```bash
-cd /Users/batonec/AndroidStudioProjects/Trainer
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m playwright install chromium
-.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
-```
+iOS-тесты — через Xcode (`xcodebuild test` по схеме `TrainerIOS`).
 
 ## Деплой
 
-Ручной деплой на текущий VPS:
-
-```bash
-cd /Users/batonec/AndroidStudioProjects/Trainer
-./telegram_miniapp/deploy/deploy.sh web
-```
-
-Полное техническое описание окружения, сервисов и deploy flow лежит в:
+Бэкенд деплоится на VPS — описание окружения, сервисов и flow в:
 
 - [telegram_miniapp/README.md](./telegram_miniapp/README.md)
 
@@ -144,15 +125,12 @@ cd /Users/batonec/AndroidStudioProjects/Trainer
 
 Что он делает:
 
-- определяет, затронуты ли `web`, `backend` и/или `bot`;
 - всегда прогоняет полный test suite;
-- после зелёного тестового job запускает точечный deploy на `main` только для реально затронутых частей.
+- после зелёного тестового job деплоит backend на `main`, если затронут backend.
 
-Дополнительные reusable workflows:
+Дополнительный reusable workflow:
 
-- [deploy-web.yml](./.github/workflows/deploy-web.yml)
 - [deploy-backend.yml](./.github/workflows/deploy-backend.yml)
-- [deploy-bot.yml](./.github/workflows/deploy-bot.yml)
 
 Нужные GitHub secrets:
 

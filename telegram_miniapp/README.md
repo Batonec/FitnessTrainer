@@ -1,6 +1,13 @@
-# Trainer Telegram Mini App
+# Trainer Backend
 
-Текущий `Trainer` — это Telegram Mini App с собственным backend API на SQLite, Telegram-ботом, browser debug-режимом и CI/deploy цепочкой на VPS.
+> **Веб-мини-апп и Telegram-бот удалены (июнь 2026).** Продукт теперь — backend API +
+> нативный iOS-клиент (см. [../ios](../ios)). Остался только бэкенд: HTTP API, SQLite,
+> сессия для iOS fixed-user (+ browser debug для разработки), каталог упражнений по
+> `/data/exercises.json` и «Совет тренера». Разделы ниже про Telegram-бота, web-фронтенд
+> и `dev_server.py` относятся к удалённым частям и остаются как исторический контекст —
+> будут переписаны (см. задачу на полный рерайт доков).
+
+Backend API на SQLite с сессиями для нативного iOS-клиента, browser debug-режимом и CI/deploy цепочкой на VPS.
 
 Этот документ отвечает на технический вопрос “из чего это собрано, как запустить, как тестировать и как выкатывать”.
 
