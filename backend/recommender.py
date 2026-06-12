@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -28,6 +29,12 @@ DEFAULT_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 DEFAULT_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "3500"))
 DEFAULT_HISTORY_LIMIT = int(os.getenv("RECOMMENDATION_HISTORY_LIMIT", "20"))
 DEFAULT_TIMEOUT = float(os.getenv("ANTHROPIC_TIMEOUT", "90"))
+
+# Transient failures worth retrying with backoff (rate limits, overload, gateway
+# hiccups). Permanent errors (400/401/403/404, refusal) are never retried.
+DEFAULT_MAX_RETRIES = int(os.getenv("ANTHROPIC_MAX_RETRIES", "2"))
+DEFAULT_RETRY_BACKOFF = float(os.getenv("ANTHROPIC_RETRY_BACKOFF", "1.5"))
+RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
 
 # Server-side sanity bounds (JSON Schema can't express numeric ranges, so the
 # model output is clamped/filtered after parsing).
@@ -521,6 +528,45 @@ def _build_schema(catalog: list[dict[str, Any]]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Anthropic call (stdlib urllib)
 # --------------------------------------------------------------------------- #
+def _fetch_anthropic(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+    max_retries: int,
+    backoff: float,
+    sleep: Callable[[float], None],
+) -> str:
+    """POST to the API, retrying transient failures with exponential backoff.
+
+    Returns the raw response body. Raises :class:`RecommendationError` on a
+    permanent failure or once retries are exhausted.
+    """
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code in RETRYABLE_STATUS
+            if not retryable or attempt >= max_retries:
+                detail = exc.read().decode("utf-8", "replace")[:300]
+                raise RecommendationError(
+                    f"Claude API вернул ошибку {exc.code}: {detail}"
+                ) from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt >= max_retries:
+                if isinstance(exc, TimeoutError) or isinstance(
+                    getattr(exc, "reason", None), TimeoutError
+                ):
+                    raise RecommendationError("Claude API не ответил вовремя") from exc
+                reason = getattr(exc, "reason", exc)
+                raise RecommendationError(
+                    f"Не удалось связаться с Claude API: {reason}"
+                ) from exc
+        sleep(backoff * (2 ** attempt))
+        attempt += 1
+
+
 def _call_anthropic(
     system: str,
     user: str,
@@ -530,6 +576,9 @@ def _call_anthropic(
     max_tokens: int,
     api_key: str,
     timeout: float,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    backoff: float = DEFAULT_RETRY_BACKOFF,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     body = json.dumps(
         {
@@ -552,18 +601,13 @@ def _call_anthropic(
         },
     )
 
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:300]
-        raise RecommendationError(
-            f"Claude API вернул ошибку {exc.code}: {detail}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise RecommendationError(f"Не удалось связаться с Claude API: {exc.reason}") from exc
-    except TimeoutError as exc:
-        raise RecommendationError("Claude API не ответил вовремя") from exc
+    raw = _fetch_anthropic(
+        request,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff=backoff,
+        sleep=sleep,
+    )
 
     try:
         data = json.loads(raw)
@@ -667,6 +711,7 @@ def generate(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     history_limit: int = DEFAULT_HISTORY_LIMIT,
     timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     """Generate a validated next-workout recommendation.
 
@@ -693,6 +738,7 @@ def generate(
         max_tokens=max_tokens,
         api_key=api_key,
         timeout=timeout,
+        max_retries=max_retries,
     )
     recommendation = _validate(parsed, catalog)
     return recommendation, usage, model

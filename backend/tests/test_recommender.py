@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import unittest
+import urllib.error
 
 import support  # noqa: F401 — adds backend to sys.path
 from support import STATIC_DIR
@@ -262,6 +264,79 @@ class ProfileTests(unittest.TestCase):
         self.assertIn("пятница", prompt)
         self.assertIn("Рабочие подходы по группам", prompt)
         self.assertIn("квадрицепс/ягодичные: 1 подходов за 7 дней", prompt)
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("http://x", code, "msg", None, io.BytesIO(b"detail"))
+
+
+class FetchRetryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._orig = recommender.urllib.request.urlopen
+        self.addCleanup(lambda: setattr(recommender.urllib.request, "urlopen", self._orig))
+        self.slept: list[float] = []
+
+    def _fetch(self, max_retries: int = 2):
+        return recommender._fetch_anthropic(
+            object(),
+            timeout=1,
+            max_retries=max_retries,
+            backoff=0.5,
+            sleep=self.slept.append,
+        )
+
+    def _patch(self, sequence) -> list[int]:
+        calls = {"n": 0}
+        it = iter(sequence)
+
+        def fake_urlopen(request, timeout=None):
+            calls["n"] += 1
+            item = next(it)
+            if isinstance(item, Exception):
+                raise item
+            return _FakeResponse(item)
+
+        recommender.urllib.request.urlopen = fake_urlopen
+        return calls
+
+    def test_retries_transient_then_succeeds(self) -> None:
+        calls = self._patch([_http_error(503), b"ok"])
+        self.assertEqual(self._fetch(), "ok")
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(self.slept, [0.5])  # one backoff before the 2nd try
+
+    def test_permanent_error_is_not_retried(self) -> None:
+        calls = self._patch([_http_error(400)])
+        with self.assertRaises(recommender.RecommendationError):
+            self._fetch()
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(self.slept, [])
+
+    def test_exhausts_retries_on_persistent_transient(self) -> None:
+        calls = self._patch([_http_error(529), _http_error(529), _http_error(529)])
+        with self.assertRaisesRegex(recommender.RecommendationError, "529"):
+            self._fetch(max_retries=2)
+        self.assertEqual(calls["n"], 3)  # initial + 2 retries
+        self.assertEqual(self.slept, [0.5, 1.0])  # exponential backoff
+
+    def test_url_error_retried_then_raised(self) -> None:
+        calls = self._patch([urllib.error.URLError("conn reset"), b"ok"])
+        self.assertEqual(self._fetch(), "ok")
+        self.assertEqual(calls["n"], 2)
 
 
 if __name__ == "__main__":

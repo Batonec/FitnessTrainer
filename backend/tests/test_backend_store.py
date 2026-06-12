@@ -749,6 +749,63 @@ class NormalizeBodyWeightPayloadTest(unittest.TestCase):
                 }
             )
 
+    def test_rejects_implausible_body_weight(self) -> None:
+        # The 22kg "exercise weight typed into the weigh-in field" bug.
+        with self.assertRaisesRegex(ValueError, "between"):
+            normalize_body_weight_payload({"entry_date": "2026-03-28", "weight": 22})
+        with self.assertRaisesRegex(ValueError, "between"):
+            normalize_body_weight_payload({"entry_date": "2026-03-28", "weight": 600})
+
+    def test_accepts_plausible_edge_weights(self) -> None:
+        self.assertEqual(
+            normalize_body_weight_payload({"entry_date": "2026-03-28", "weight": 30})["weight"],
+            30.0,
+        )
+        self.assertEqual(
+            normalize_body_weight_payload({"entry_date": "2026-03-28", "weight": 400})["weight"],
+            400.0,
+        )
+
+
+class RecommendationLogTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.store = MiniAppStore(Path(self.temp_dir.name) / "trainer.db")
+        self.uid = int(self.store.ensure_debug_user("log-user")["id"])
+
+    def _rec(self, focus: str) -> dict:
+        return {
+            "focus": focus,
+            "load_type": "medium",
+            "rationale": "r",
+            "exercises": [{"exercise_id": 1, "name": "X", "note": "", "sets": [{"reps": 10, "weight": 50}]}],
+        }
+
+    def test_save_appends_to_log_each_time(self) -> None:
+        self.store.save_recommendation(self.uid, 1, 5, "m", self._rec("A"), 10, 20)
+        self.store.save_recommendation(self.uid, 2, 6, "m", self._rec("B"), 11, 21)
+        log = self.store.list_recommendation_log(self.uid)
+        self.assertEqual([e["recommendation"]["focus"] for e in log], ["B", "A"])  # newest first
+        self.assertEqual(log[0]["status"], "ready")
+        self.assertEqual(log[0]["input_tokens"], 11)
+
+    def test_failed_generation_is_logged(self) -> None:
+        self.store.fail_recommendation(self.uid, "ANTHROPIC_API_KEY не настроен")
+        log = self.store.list_recommendation_log(self.uid)
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["status"], "failed")
+        self.assertIn("ANTHROPIC_API_KEY", log[0]["error"])
+
+    def test_pending_is_not_logged(self) -> None:
+        self.store.set_recommendation_pending(self.uid)
+        self.assertEqual(self.store.list_recommendation_log(self.uid), [])
+
+    def test_log_is_isolated_per_user(self) -> None:
+        other = int(self.store.ensure_debug_user("log-user-2")["id"])
+        self.store.save_recommendation(self.uid, 1, 5, "m", self._rec("mine"), 1, 2)
+        self.assertEqual(self.store.list_recommendation_log(other), [])
+
 
 if __name__ == "__main__":
     unittest.main()

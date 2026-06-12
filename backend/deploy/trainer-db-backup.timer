@@ -1,0 +1,11 @@
+[Unit]
+Description=Trainer: nightly trainer.db backup
+
+[Timer]
+# 04:00 Europe/Moscow (low-traffic hour). Persistent catches up after downtime.
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

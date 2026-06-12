@@ -223,6 +223,14 @@ def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], 
     return normalized_payload, client_id
 
 
+# Plausible human body-weight bounds. Outside this range an entry is almost
+# certainly a data-entry slip (e.g. an exercise weight typed into the weigh-in
+# field — that is how 22kg readings appeared for an 77kg athlete). Rejected at
+# write time so the garbage never reaches the DB or the coach's calorie logic.
+MIN_BODY_WEIGHT_KG = 30.0
+MAX_BODY_WEIGHT_KG = 400.0
+
+
 def normalize_body_weight_payload(payload: dict[str, Any]) -> dict[str, Any]:
     entry_date = str(payload.get("entry_date", "")).strip()
     try:
@@ -237,6 +245,10 @@ def normalize_body_weight_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     if weight <= 0:
         raise ValueError("weight must be greater than 0")
+    if not (MIN_BODY_WEIGHT_KG <= weight <= MAX_BODY_WEIGHT_KG):
+        raise ValueError(
+            f"weight must be between {MIN_BODY_WEIGHT_KG:g} and {MAX_BODY_WEIGHT_KG:g} kg"
+        )
 
     return {
         "entry_date": entry_date,
@@ -329,6 +341,26 @@ class MiniAppStore:
                     updated_at INTEGER NOT NULL,
                     UNIQUE(user_id)
                 );
+
+                -- Append-only journal of every generation (the table above keeps
+                -- only the current cached row). Feeds future stats — token spend
+                -- over time, плановая дисциплина — and gives a debugging trail.
+                CREATE TABLE IF NOT EXISTS recommendation_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL,
+                    based_on_workout_id INTEGER,
+                    based_on_workout_count INTEGER,
+                    model TEXT,
+                    payload_json TEXT,
+                    error TEXT,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_recommendation_log_user
+                ON recommendation_log(user_id, id DESC);
                 """
             )
 
@@ -673,6 +705,19 @@ class MiniAppStore:
                     timestamp,
                 ),
             )
+            self._append_recommendation_log(
+                connection,
+                user_id=user_id,
+                status="ready",
+                based_on_workout_id=based_on_workout_id,
+                based_on_workout_count=based_on_workout_count,
+                model=model,
+                payload_json=payload_json,
+                error=None,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                timestamp=timestamp,
+            )
             row = connection.execute(
                 "SELECT * FROM recommendations WHERE user_id = ?",
                 (user_id,),
@@ -695,10 +740,78 @@ class MiniAppStore:
                 """,
                 (user_id, error[:500], timestamp, timestamp),
             )
+            self._append_recommendation_log(
+                connection,
+                user_id=user_id,
+                status="failed",
+                based_on_workout_id=None,
+                based_on_workout_count=None,
+                model=None,
+                payload_json=None,
+                error=error[:500],
+                input_tokens=None,
+                output_tokens=None,
+                timestamp=timestamp,
+            )
+
+    def _append_recommendation_log(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: int,
+        status: str,
+        based_on_workout_id: int | None,
+        based_on_workout_count: int | None,
+        model: str | None,
+        payload_json: str | None,
+        error: str | None,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        timestamp: int,
+    ) -> None:
+        """Append one immutable row to the generation journal (same transaction)."""
+        connection.execute(
+            """
+            INSERT INTO recommendation_log (
+                user_id, status, based_on_workout_id, based_on_workout_count,
+                model, payload_json, error, input_tokens, output_tokens, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                status,
+                based_on_workout_id,
+                based_on_workout_count,
+                model,
+                payload_json,
+                error,
+                input_tokens,
+                output_tokens,
+                timestamp,
+            ),
+        )
+
+    def list_recommendation_log(
+        self, user_id: int, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Past generations for a user, newest first (append-only journal)."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM recommendation_log
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [self._deserialize_recommendation(row) for row in rows]
 
     def _deserialize_recommendation(self, row: sqlite3.Row) -> dict[str, Any]:
         payload_raw = row["payload_json"]
         recommendation = json.loads(payload_raw) if payload_raw else None
+        keys = row.keys()
         return {
             "id": row["id"],
             "status": row["status"],
@@ -710,7 +823,8 @@ class MiniAppStore:
             "input_tokens": row["input_tokens"],
             "output_tokens": row["output_tokens"],
             "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
+            # The append-only log has no updated_at; fall back to created_at.
+            "updated_at": row["updated_at"] if "updated_at" in keys else row["created_at"],
         }
 
     def list_body_weights(self, user_id: int) -> list[dict[str, Any]]:
