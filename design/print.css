@@ -1,0 +1,57 @@
+/* Print-friendly overrides */
+.print-root {
+  background: #EFEAE4;
+  min-height: 100vh;
+  padding: 24px;
+  display: flex; flex-direction: column; align-items: center; gap: 32px;
+}
+.print-page {
+  width: 100%;
+  max-width: 520px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.print-page + .print-page {
+  page-break-before: page;
+  break-before: page;
+}
+.print-label {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #3A3A42;
+}
+.print-frame {
+  /* the PhoneShell renders at 392×850 — let it sit naturally */
+}
+
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+@media print {
+  html, body {
+    background: #EFEAE4 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-root {
+    background: #EFEAE4 !important;
+    padding: 0;
+    gap: 0;
+  }
+  .print-page {
+    min-height: calc(100vh - 24mm);
+    justify-content: center;
+    padding: 8mm 0;
+  }
+  /* glass / blur effects render fine on most engines but make sure backdrops paint */
+  .glass, .glass-thick, .liquid-glass, .chip {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

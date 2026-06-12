@@ -1,0 +1,189 @@
+/* Trainer iOS — refreshed design system (v2)
+   All-mono direction: JetBrains Mono across the entire UI for a calm,
+   technical, data-driven feel — fitting a fitness tracker built on numbers. */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* Accents (settable via Tweaks) */
+  --accent: #FF4D1F;
+  --accent-soft: #FFE8DE;
+  --accent-deep: #C8360A;
+
+  /* Ink ramp — cooler, more graphite */
+  --ink:    #0E0F12;   /* primary type, headlines */
+  --ink-2:  #2E3138;   /* body copy */
+  --ink-3:  #6E727B;   /* labels / metadata */
+  --ink-4:  #A8ACB4;   /* placeholders */
+  --ink-5:  #D6D8DD;   /* dividers strong */
+
+  /* Paper — cool off-white with the slightest warmth */
+  --paper:    #F2F0EC;
+  --paper-2:  #E8E6E1;
+  --paper-3:  #DEDBD4;
+
+  /* Surface */
+  --card:        rgba(255,255,255,0.78);
+  --card-bord:   rgba(14,15,18,0.07);
+  --hairline:    rgba(14,15,18,0.08);
+  --hairline-2:  rgba(14,15,18,0.05);
+
+  /* Signal */
+  --ok:   #1F9D6B;
+  --warn: #D89324;
+  --bad:  #DC4848;
+
+  /* Font stacks */
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum", "ss01";
+  background: #15141A;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  color: var(--ink);
+}
+* { box-sizing: border-box; }
+button { font: inherit; border: 0; background: 0; cursor: pointer; color: inherit; padding: 0; }
+
+/* ------------------------------------------------------------------ */
+/* Frame wallpaper — cooler paper with a single restrained accent wash */
+/* ------------------------------------------------------------------ */
+.iframe-wall {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(70% 55% at 86% 4%, rgba(255, 90, 40, 0.34), transparent 62%),
+    radial-gradient(45% 35% at 6% 96%, rgba(30, 45, 70, 0.09), transparent 70%),
+    linear-gradient(180deg, #F4F2EE 0%, #EAE7E1 100%);
+}
+.iframe-wall.dim {
+  background:
+    radial-gradient(70% 55% at 86% 4%, rgba(255, 90, 40, 0.18), transparent 62%),
+    linear-gradient(180deg, #ECEAE4 0%, #E2DFD8 100%);
+}
+
+/* ------------------------------------------------------------------ */
+/* Glass primitives — refined: less blur, sharper line, calmer shadow  */
+/* ------------------------------------------------------------------ */
+.glass {
+  background: rgba(255,255,255,0.66);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 0.5px solid rgba(255,255,255,0.85);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.55),
+    0 1px 0 rgba(14,15,18,0.025),
+    0 10px 24px -8px rgba(14,15,18,0.10);
+}
+.glass-thick {
+  background: rgba(255,255,255,0.84);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 0.5px solid rgba(255,255,255,0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.7),
+    0 1px 0 rgba(14,15,18,0.03),
+    0 16px 36px -12px rgba(14,15,18,0.14);
+}
+
+/* "Liquid" surface used for hero pieces — keeps a bright top rim via
+   inset box-shadow only (no big screen-blend sheen that turns into a
+   stripe artifact on shorter surfaces like the tab bar). */
+.liquid-glass {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.58) 0%, rgba(255,255,255,0.34) 60%, rgba(255,255,255,0.46) 100%);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.85),
+    inset 0 -1px 0 rgba(14,15,18,0.05),
+    0 1px 0 rgba(14,15,18,0.025),
+    0 18px 36px -14px rgba(14,15,18,0.18);
+}
+
+/* Small inline chip — used for pills, segmented controls */
+.chip {
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 0.5px solid rgba(255,255,255,0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    0 1px 0 rgba(14,15,18,0.03);
+}
+
+/* "Ink" card — solid alternative to glass, used for emphasis blocks */
+.ink-card {
+  background: #0E0F12;
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 18px 40px -14px rgba(14,15,18,0.45);
+}
+
+/* ------------------------------------------------------------------ */
+/* Typography — single family (JetBrains Mono) across the entire UI.    */
+/* Mono fonts are wider than proportional, so headlines run tighter and */
+/* a bit smaller in spec than equivalent SF Pro sizes.                  */
+/* ------------------------------------------------------------------ */
+.t-display {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+.t-num {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum", "ss01";
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+.t-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.t-label-lg {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.t-label-xs {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Tap targets */
+.row-tap:active { transform: scale(0.985); transition: transform 80ms; }
+
+/* Hairlines and separators */
+.hairline { height: 0.5px; background: var(--hairline); }
+.hairline-2 { height: 0.5px; background: var(--hairline-2); }
+
+/* Number tickers */
+.tick-up   { color: var(--ok); }
+.tick-down { color: var(--bad); }
+
+/* Accent FAB swirl ring */
+@keyframes pulse-ring { 0%{transform:scale(1);opacity:.7} 100%{transform:scale(1.4);opacity:0} }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spark-pulse { 0%,100%{ transform: scale(1); opacity:1 } 50%{ transform: scale(0.86); opacity:0.7 } }
+@keyframes bar-grow   { from { transform: scaleY(0); } to { transform: scaleY(1); } }

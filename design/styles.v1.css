@@ -1,0 +1,119 @@
+/* Trainer iOS — liquid-glass design system */
+:root {
+  --accent: #FF5A1F;
+  --accent-soft: #FFEDE3;
+  --accent-deep: #D43F0A;
+  --ink: #0B0B10;
+  --ink-2: #3A3A42;
+  --ink-3: #7A7A82;
+  --ink-4: #B2B2B8;
+  --paper: #F4F1ED;
+  --paper-2: #ECE7E0;
+  --card: rgba(255,255,255,0.72);
+  --card-bord: rgba(20,16,12,0.06);
+  --ok: #1FB67A;
+  --warn: #E8A52C;
+  --bad: #E55454;
+  --sep: rgba(20,16,12,0.08);
+}
+
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  background: #1f1c19;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+* { box-sizing: border-box; }
+button { font: inherit; border: 0; background: 0; cursor: pointer; color: inherit; padding: 0; }
+
+/* Frame wallpaper — warm gradient with blurred color blobs that the glass picks up */
+.iframe-wall {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(60% 50% at 80% 8%, rgba(255,120,60,0.55), transparent 70%),
+    radial-gradient(50% 40% at 12% 95%, rgba(255,180,120,0.40), transparent 70%),
+    radial-gradient(40% 35% at 90% 100%, rgba(120,90,255,0.18), transparent 70%),
+    linear-gradient(180deg, #F4EFE8 0%, #EDE6DC 100%);
+}
+.iframe-wall.dim {
+  background:
+    radial-gradient(60% 50% at 80% 8%, rgba(255,120,60,0.32), transparent 70%),
+    radial-gradient(50% 40% at 12% 95%, rgba(255,180,120,0.22), transparent 70%),
+    linear-gradient(180deg, #F4EFE8 0%, #EDE6DC 100%);
+}
+
+/* Glass primitives */
+.glass {
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    0 1px 2px rgba(20,16,12,0.04),
+    0 12px 32px rgba(20,16,12,0.08);
+}
+.glass-thick {
+  background: rgba(255,255,255,0.78);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.7),
+    0 2px 6px rgba(20,16,12,0.05),
+    0 24px 60px rgba(20,16,12,0.12);
+}
+/* iOS 26 liquid-glass — translucent + heavy backdrop, bright top rim, bottom shade */
+.liquid-glass {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.28) 50%, rgba(255,255,255,0.42) 100%);
+  backdrop-filter: blur(36px) saturate(220%) brightness(1.05);
+  -webkit-backdrop-filter: blur(36px) saturate(220%) brightness(1.05);
+  border: 0.5px solid rgba(255,255,255,0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.95),
+    inset 0 -1px 0 rgba(20,16,12,0.06),
+    inset 0 0 0 0.5px rgba(255,255,255,0.25),
+    0 1px 1px rgba(20,16,12,0.04),
+    0 18px 40px rgba(20,16,12,0.14);
+}
+.liquid-glass::after {
+  content: '';
+  position: absolute;
+  top: 1px; left: 8%; right: 8%;
+  height: 35%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 100%);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.chip {
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.65);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 2px rgba(20,16,12,0.04);
+}
+
+/* Typography */
+.t-display { font-family: "SF Pro Display", -apple-system, system-ui; font-weight: 760; letter-spacing: -0.03em; }
+.t-num     { font-feature-settings: "tnum"; }
+.t-mono    { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-feature-settings: "tnum"; }
+
+/* Tap targets */
+.row-tap:active { transform: scale(0.985); transition: transform 80ms; }
+
+/* Accent FAB swirl */
+@keyframes pulse-ring { 0%{transform:scale(1);opacity:.7} 100%{transform:scale(1.4);opacity:0} }
+
+/* Subtle separator line */
+.hairline { height: 0.5px; background: var(--sep); }
+
+/* Number tickers */
+.tick-up { color: var(--ok); }
+.tick-down { color: var(--bad); }
+
+/* Bar grow */
+@keyframes bar-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
