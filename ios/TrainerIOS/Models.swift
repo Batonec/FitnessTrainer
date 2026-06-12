@@ -287,12 +287,19 @@ struct RecommendationPayload: Codable, Hashable {
     var loadType: String
     var rationale: String
     var exercises: [RecommendedExercise]
+    // When the coach suggests doing this workout. restDays: 0 = today, 1 = tomorrow…
+    // nextWorkoutDate: that resolved to an ISO date server-side. Optional — older
+    // cached payloads predate these fields.
+    var restDays: Int?
+    var nextWorkoutDate: String?
 
     enum CodingKeys: String, CodingKey {
         case focus
         case loadType = "load_type"
         case rationale
         case exercises
+        case restDays = "rest_days"
+        case nextWorkoutDate = "next_workout_date"
     }
 }
 

@@ -266,6 +266,52 @@ class ProfileTests(unittest.TestCase):
         self.assertIn("квадрицепс/ягодичные: 1 подходов за 7 дней", prompt)
 
 
+class RestDaysTests(unittest.TestCase):
+    def _raw(self, **extra):
+        base = {
+            "focus": "f",
+            "load_type": "medium",
+            "rationale": "r",
+            "exercises": [
+                {"exercise_id": 8, "name": "Жим ногами", "note": "n", "sets": [{"reps": 10, "weight": 100}]}
+            ],
+        }
+        base.update(extra)
+        return base
+
+    def test_validate_defaults_rest_days_when_missing(self) -> None:
+        self.assertEqual(recommender._validate(self._raw(), CATALOG)["rest_days"], 1)
+
+    def test_validate_clamps_and_coerces_rest_days(self) -> None:
+        self.assertEqual(recommender._validate(self._raw(rest_days=99), CATALOG)["rest_days"], recommender.MAX_REST_DAYS)
+        self.assertEqual(recommender._validate(self._raw(rest_days=-3), CATALOG)["rest_days"], 0)
+        self.assertEqual(recommender._validate(self._raw(rest_days="2"), CATALOG)["rest_days"], 2)
+
+    def test_schema_requires_rest_days(self) -> None:
+        schema = recommender._build_schema(CATALOG)
+        self.assertIn("rest_days", schema["properties"])
+        self.assertIn("rest_days", schema["required"])
+
+    def test_generate_resolves_next_workout_date(self) -> None:
+        import os
+        from datetime import date
+
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        self.addCleanup(lambda: os.environ.pop("ANTHROPIC_API_KEY", None))
+        orig = recommender._call_anthropic
+        self.addCleanup(lambda: setattr(recommender, "_call_anthropic", orig))
+        recommender._call_anthropic = lambda *a, **k: (self._raw(rest_days=2), {"input_tokens": 1, "output_tokens": 1})
+
+        rec, _usage, _model = recommender.generate(
+            [{"workout_date": "2026-06-01", "data": {"exercises": []}}],
+            [],
+            CATALOG,
+            today=date(2026, 6, 12),
+        )
+        self.assertEqual(rec["rest_days"], 2)
+        self.assertEqual(rec["next_workout_date"], "2026-06-14")
+
+
 class _FakeResponse:
     def __init__(self, body: bytes) -> None:
         self._body = body

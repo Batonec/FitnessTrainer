@@ -2222,7 +2222,7 @@ private struct HistoryNextWorkoutCard: View {
             store.currentTab = .trainings
         } label: {
             HStack(spacing: 0) {
-                dateRail
+                dateRail(payload)
                 rightSide(payload)
             }
             .background(
@@ -2240,16 +2240,18 @@ private struct HistoryNextWorkoutCard: View {
         .buttonStyle(.plain)
     }
 
-    // Accent-tinted rail showing the planned (next) session date — mirrors the
-    // history date rail, but warm instead of grey to read as "upcoming".
-    private var dateRail: some View {
-        VStack {
+    // Accent-tinted rail showing the planned (next) session date the coach
+    // picked — mirrors the history date rail, but warm instead of grey to read
+    // as "upcoming". Bottom label is the relative day when known (СЕГОДНЯ/ЗАВТРА).
+    private func dateRail(_ payload: RecommendationPayload) -> some View {
+        let date = plannedDate(payload)
+        return VStack {
             VStack(spacing: 2) {
-                Text(todayDay)
+                Text(ruDate("d", date))
                     .font(.jbm(28, weight: .heavy))
                     .tracking(-0.04 * 28)
                     .foregroundStyle(DesignPalette.ink)
-                Text(todayMonth)
+                Text(ruDate("LLL", date).uppercased())
                     .tLabel()
             }
             Rectangle()
@@ -2257,10 +2259,10 @@ private struct HistoryNextWorkoutCard: View {
                 .frame(width: 22, height: 0.5)
                 .padding(.vertical, 4)
             VStack(spacing: 2) {
-                Text(todayWeekday)
+                Text(ruDate("EE", date).uppercased())
                     .tLabel()
                     .foregroundStyle(DesignPalette.accent)
-                Text("ПЛАН")
+                Text(planLabel(payload))
                     .tLabel(size: 9.5)
             }
         }
@@ -2408,17 +2410,29 @@ private struct HistoryNextWorkoutCard: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: date of the planned (next) session — today
+    // MARK: planned (next) session date — from the coach, falling back to today
 
-    private func ruToday(_ format: String) -> String {
+    private func plannedDate(_ payload: RecommendationPayload) -> Date {
+        if let iso = payload.nextWorkoutDate, !iso.isEmpty {
+            return DateTools.date(from: iso)
+        }
+        return Date()
+    }
+
+    private func planLabel(_ payload: RecommendationPayload) -> String {
+        switch payload.restDays {
+        case 0: return "СЕГОДНЯ"
+        case 1: return "ЗАВТРА"
+        default: return "ПЛАН"
+        }
+    }
+
+    private func ruDate(_ format: String, _ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "ru_RU")
         f.dateFormat = format
-        return f.string(from: Date()).replacingOccurrences(of: ".", with: "")
+        return f.string(from: date).replacingOccurrences(of: ".", with: "")
     }
-    private var todayDay: String { ruToday("d") }
-    private var todayMonth: String { ruToday("LLL").uppercased() }
-    private var todayWeekday: String { ruToday("EE").uppercased() }
 }
 
 // Date-rail HistoryCard: left 64px column with day number + month label +

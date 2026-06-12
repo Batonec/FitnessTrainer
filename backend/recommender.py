@@ -17,7 +17,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -42,6 +42,7 @@ MAX_REPS = 100
 MAX_WEIGHT = 1000.0
 MAX_EXERCISES = 10
 MAX_SETS_PER_EXERCISE = 12
+MAX_REST_DAYS = 7  # how far out the coach may schedule the next session
 
 ALLOWED_LOAD_TYPES = ("heavy", "medium", "light")
 
@@ -413,7 +414,10 @@ def _build_system_prompt(
         "Пиши на «ты», как живой тренер, структурно и по делу:\n"
         "1) почему именно такой день (тяжесть, состав) — с опорой на объёмы недели, "
         "давность и отметки тяжести;\n"
-        "2) КОГДА идти на эту тренировку (сегодня / завтра / «дай ещё день отдыха»);\n"
+        "2) КОГДА идти на эту тренировку — словами (сегодня / завтра / «дай ещё "
+        "день отдыха») и обязательно тем же числом в поле rest_days "
+        "(0 = сегодня, 1 = завтра, 2 = послезавтра); держи текст и rest_days "
+        "согласованными;\n"
         "3) краткий статус недельного объёма по группам (где добор, где уже хватит);\n"
         "4) комментарий по весу тела и калориям, если есть свежие данные;\n"
         "5) при необходимости — предложение нового упражнения или разгрузки.\n"
@@ -480,6 +484,16 @@ def _build_schema(catalog: list[dict[str, Any]]) -> dict[str, Any]:
                 "description": "На что нацелена тренировка (кратко, по-русски)",
             },
             "load_type": {"type": "string", "enum": list(ALLOWED_LOAD_TYPES)},
+            "rest_days": {
+                "type": "integer",
+                "description": (
+                    "Через сколько дней от сегодня проводить эту тренировку: "
+                    "0 = сегодня, 1 = завтра, 2 = послезавтра и т.д. Учитывай "
+                    "давность последней тренировки, нагрузку прошлой сессии, "
+                    "усталость/сон/стресс, ритм ~3 раза в неделю и гормональный "
+                    "цикл (тяжёлые сессии — ближе к началу недельного цикла)"
+                ),
+            },
             "rationale": {
                 "type": "string",
                 "description": (
@@ -520,7 +534,7 @@ def _build_schema(catalog: list[dict[str, Any]]) -> dict[str, Any]:
                 },
             },
         },
-        "required": ["focus", "load_type", "rationale", "exercises"],
+        "required": ["focus", "load_type", "rest_days", "rationale", "exercises"],
         "additionalProperties": False,
     }
 
@@ -643,6 +657,12 @@ def _validate(raw: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, A
     if load_type not in ALLOWED_LOAD_TYPES:
         load_type = "medium"
 
+    try:
+        rest_days = int(raw.get("rest_days"))
+    except (TypeError, ValueError):
+        rest_days = 1
+    rest_days = min(max(rest_days, 0), MAX_REST_DAYS)
+
     exercises_out: list[dict[str, Any]] = []
     for exercise in raw.get("exercises", []) or []:
         if not isinstance(exercise, dict):
@@ -692,6 +712,7 @@ def _validate(raw: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, A
     return {
         "focus": str(raw.get("focus", "")).strip(),
         "load_type": load_type,
+        "rest_days": rest_days,
         "rationale": str(raw.get("rationale", "")).strip(),
         "exercises": exercises_out,
     }
@@ -741,4 +762,10 @@ def generate(
         max_retries=max_retries,
     )
     recommendation = _validate(parsed, catalog)
+    # Resolve the model's relative rest_days into an absolute date at generation
+    # time (auto-freshness regenerates daily, so it stays current). The card
+    # shows a fixed target instead of doing date math on the client.
+    recommendation["next_workout_date"] = (
+        today + timedelta(days=recommendation["rest_days"])
+    ).isoformat()
     return recommendation, usage, model

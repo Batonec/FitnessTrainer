@@ -62,8 +62,10 @@ systemd-таймером
 ([deploy/trainer-db-backup.timer](./deploy/trainer-db-backup.timer), 04:00 МСК).
 Восстановление: `gunzip -c backups/trainer-<stamp>.db.gz > trainer.db`.
 
-Формат: `focus`, `load_type` (heavy/medium/light), развёрнутый `rationale` (почему именно
-такой план) и `exercises[]` с `exercise_id`/`name`/`note`/`sets[{reps,weight}]`. Требуется
+Формат: `focus`, `load_type` (heavy/medium/light), `rest_days` (через сколько дней от
+сегодня проводить тренировку: 0 — сегодня, 1 — завтра…) и вычисленная из него абсолютная
+`next_workout_date` (ISO), развёрнутый `rationale` (почему именно такой план) и
+`exercises[]` с `exercise_id`/`name`/`note`/`sets[{reps,weight}]`. Требуется
 `ANTHROPIC_API_KEY`; без него генерация отвечает понятной ошибкой, остальные эндпоинты работают.
 Временные сбои API (429/5xx/529, таймаут, обрыв связи) повторяются с экспоненциальным
 backoff (`ANTHROPIC_MAX_RETRIES`); постоянные (400/401/refusal) — нет. Каждая генерация
