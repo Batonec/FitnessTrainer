@@ -1054,8 +1054,8 @@ private struct TodayScreen: View {
                     setIndex: nextState.setIndex
                 )
             }
-            .presentationDetents([.height(580)])
-            .presentationBackground(.clear)
+            .presentationDetents([.height(560)])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showRationale) {
             CoachRationaleSheet(
@@ -1681,23 +1681,15 @@ struct QuickAddSheet: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.38).ignoresSafeArea()
+            WarmWallpaper()
 
-            VStack {
-                Spacer()
+            VStack(spacing: 0) {
+                exerciseHeader
+
                 VStack(spacing: 0) {
-                    Capsule()
-                        .fill(DesignPalette.ink.opacity(0.16))
-                        .frame(width: 38, height: 5)
-                        .padding(.top, 10)
-                        .padding(.bottom, 2)
-
-                    exerciseHeader
-
-                    VStack(spacing: 0) {
-                        Text("Вес, кг")
-                            .tLabel()
-                            .padding(.top, 6)
+                    Text("Вес, кг")
+                        .tLabel()
+                        .padding(.top, 6)
 
                         Stepper(
                             value: TrainerLogic.formatWeight(state.weight),
@@ -1764,29 +1756,10 @@ struct QuickAddSheet: View {
                     }
                     .padding(.horizontal, 24)
                     .padding(.bottom, 24)
-                }
-                .background(panelBackground)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 16)
+
+                Spacer(minLength: 0)
             }
         }
-        .background(.clear)
-    }
-
-    // Solid warm panel — a modal must read crisply, so this is opaque paper with
-    // a glass-like rim and a soft lift, not a see-through glass tile.
-    private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 32, style: .continuous)
-            .fill(DesignPalette.paper)
-            .overlay(
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                    .fill(Color.white.opacity(0.45))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                    .stroke(Color.white.opacity(0.7), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.22), radius: 32, y: 14)
     }
 
     private var exerciseHeader: some View {
