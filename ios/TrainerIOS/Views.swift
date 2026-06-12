@@ -1657,15 +1657,15 @@ private struct TodayExerciseCard: View {
                     .font(.jbm(18, weight: .bold))
                     .foregroundStyle(.white)
             }
-            // Visual circle stays 42pt; the tap target is a generous 56pt square.
-            .frame(width: 56, height: 56)
+            // Visual circle stays 42pt; the tap target is a generous 64pt square.
+            .frame(width: 64, height: 64)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable(scale: 0.84))
         .accessibilityLabel("Добавить подход")
         .accessibilityHint("Долгое нажатие — свой вес и повторы")
         .highPriorityGesture(
-            LongPressGesture(minimumDuration: 0.25, maximumDistance: 18)
+            LongPressGesture(minimumDuration: 0.32, maximumDistance: 18)
                 .onEnded { _ in
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     onManual()
