@@ -1540,7 +1540,6 @@ private struct TodayExerciseCard: View {
     var onManual: () -> Void
     var onEditLast: () -> Void
     var onLongPress: () -> Void
-    @State private var plusPressed = false
 
 
     var body: some View {
@@ -1634,49 +1633,44 @@ private struct TodayExerciseCard: View {
         .buttonStyle(.plain)
     }
 
-    // Plain view + tap/long-press gestures: a `Button` wrapper swallows the
-    // long press (its tap interaction wins), which made the set constructor
-    // unreachable from the "+" on devices.
+    // Tap = add a set; long-press = open the manual editor. A real Button gives
+    // reliable tap + press animation inside the ScrollView; the long-press is a
+    // `highPriorityGesture` so it deterministically wins over the card's own
+    // long-press and the scroll's pan (the old tap+longPress+card-longPress mix
+    // arbitrated unpredictably — opening the editor late or not at all).
     private var plusButton: some View {
-        ZStack {
-            Circle()
-                .fill(DesignPalette.accent)
-                .frame(width: 42, height: 42)
-                .shadow(color: DesignPalette.accent.opacity(0.33), radius: 10, y: 5)
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
-                        .blendMode(.plusLighter)
-                )
-            Image(systemName: "plus")
-                .font(.jbm(18, weight: .bold))
-                .foregroundStyle(.white)
-        }
-        .scaleEffect(plusPressed ? 0.84 : 1)
-        .animation(.spring(response: 0.22, dampingFraction: 0.55), value: plusPressed)
-        // Visual circle stays 42pt, but the tap target is a generous 56pt square
-        // so you don't have to aim precisely.
-        .frame(width: 56, height: 56)
-        .contentShape(Rectangle())
-        .accessibilityLabel("Добавить подход")
-        .accessibilityHint("Долгое нажатие — свой вес и повторы")
-        .onTapGesture {
+        Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onAdd()
-        }
-        // `pressing:` drives the scale on touch-down for BOTH a quick tap and a
-        // hold; on release we keep the pressed look ~140ms so even a fast tap is
-        // visibly animated. `perform:` opens the manual editor on a short hold.
-        .onLongPressGesture(minimumDuration: 0.12, maximumDistance: 16, pressing: { isPressing in
-            if isPressing {
-                plusPressed = true
-            } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { plusPressed = false }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(DesignPalette.accent)
+                    .frame(width: 42, height: 42)
+                    .shadow(color: DesignPalette.accent.opacity(0.33), radius: 10, y: 5)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
+                            .blendMode(.plusLighter)
+                    )
+                Image(systemName: "plus")
+                    .font(.jbm(18, weight: .bold))
+                    .foregroundStyle(.white)
             }
-        }, perform: {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            onManual()
-        })
+            // Visual circle stays 42pt; the tap target is a generous 56pt square.
+            .frame(width: 56, height: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable(scale: 0.84))
+        .accessibilityLabel("Добавить подход")
+        .accessibilityHint("Долгое нажатие — свой вес и повторы")
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.25, maximumDistance: 18)
+                .onEnded { _ in
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onManual()
+                }
+        )
     }
 }
 
