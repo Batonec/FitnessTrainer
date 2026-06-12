@@ -394,6 +394,37 @@ struct RecommendationSnapshot: Codable, Hashable {
     }
 }
 
+/// Weekly work-set count for one muscle group against the coaching landmarks.
+enum VolumeStatus { case under, onTarget, over }
+
+struct MuscleGroupVolume: Identifiable {
+    var name: String
+    var count: Int
+    var minTarget: Int
+    var maxTarget: Int
+
+    var id: String { name }
+    var status: VolumeStatus {
+        if count < minTarget { return .under }
+        if count > maxTarget { return .over }
+        return .onTarget
+    }
+    /// Bar fill 0…1 against the upper landmark.
+    var fill: Double { maxTarget == 0 ? 0 : min(1, Double(count) / Double(maxTarget)) }
+}
+
+/// Plan-vs-performed adherence over a set of workouts that carried a coach
+/// recommendation snapshot.
+struct AdherenceSummary {
+    var comparedWorkouts: Int
+    var plannedSets: Int
+    var doneSets: Int       // capped at planned per exercise
+    var skippedExercises: Int
+
+    var ratio: Double { plannedSets == 0 ? 0 : Double(doneSets) / Double(plannedSets) }
+    var hasData: Bool { comparedWorkouts > 0 && plannedSets > 0 }
+}
+
 struct DraftWorkout: Codable, Hashable {
     var workoutDate: String
     var exercises: [DraftExercise]

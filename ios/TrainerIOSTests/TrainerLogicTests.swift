@@ -559,4 +559,75 @@ final class TrainerLogicTests: XCTestCase {
         ]
         XCTAssertEqual(TrainerLogic.latestWorkingWeight(in: workouts, exerciseID: 8), 95)
     }
+
+    // MARK: - Weekly volume by muscle group
+
+    func testWeeklyVolumeCountsPrimaryMuscleWithinWindow() {
+        let today = DateTools.date(from: "2026-06-12")
+        let workouts = [
+            TestFixtures.workout(id: 1, clientID: "a", date: "2026-06-10", exercises: [
+                TestFixtures.exercise(id: 18, name: "Жим", sets: [TestFixtures.set(), TestFixtures.set(), TestFixtures.set()])
+            ]),
+            TestFixtures.workout(id: 2, clientID: "b", date: "2026-06-11", exercises: [
+                TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [TestFixtures.set(), TestFixtures.set()])
+            ]),
+            TestFixtures.workout(id: 3, clientID: "c", date: "2026-05-01", exercises: [  // outside 7d window
+                TestFixtures.exercise(id: 18, name: "Жим", sets: [TestFixtures.set()])
+            ]),
+        ]
+        let vol = TrainerLogic.weeklyVolumeByGroup(workouts, today: today, days: 7)
+        let chest = vol.first { $0.name == "Грудь" }!
+        XCTAssertEqual(chest.count, 3)
+        XCTAssertEqual(chest.status, .under)   // 3 < 10
+        XCTAssertEqual(vol.first { $0.name == "Квадрицепс/ягод." }?.count, 2)
+        XCTAssertEqual(vol.first { $0.name == "Бицепс бедра" }?.count, 0)
+    }
+
+    func testVolumeStatusThresholds() {
+        var v = MuscleGroupVolume(name: "Бицепс", count: 6, minTarget: 4, maxTarget: 8)
+        XCTAssertEqual(v.status, .onTarget)
+        v.count = 2; XCTAssertEqual(v.status, .under)
+        v.count = 10; XCTAssertEqual(v.status, .over)
+    }
+
+    // MARK: - Plan-vs-fact adherence
+
+    func testAdherenceCapsDoneAtPlannedAndCountsSkips() {
+        var w = TestFixtures.workout(
+            id: 1, clientID: "a", date: DateTools.localTodayISO(),
+            exercises: [
+                // did 4 sets of ex 8 (one extra beyond the planned 3)
+                TestFixtures.exercise(id: 8, name: "Жим ногами",
+                                      sets: [TestFixtures.set(), TestFixtures.set(), TestFixtures.set(), TestFixtures.set()])
+                // ex 9 planned but never done → skipped
+            ]
+        )
+        w.data.recommendation = RecommendationSnapshot(
+            schema: 1, source: "coach", model: nil, generatedAt: nil, appliedAt: nil,
+            basedOnWorkoutID: nil, basedOnWorkoutCount: nil, focus: nil, loadType: nil,
+            exercises: [
+                RecommendedExercise(exerciseID: 8, name: "Жим ногами", note: nil,
+                                    sets: [RecommendedSet(reps: 10, weight: 100), RecommendedSet(reps: 10, weight: 100), RecommendedSet(reps: 10, weight: 100)]),
+                RecommendedExercise(exerciseID: 9, name: "Тяга", note: nil,
+                                    sets: [RecommendedSet(reps: 10, weight: 60)])
+            ]
+        )
+        let s = TrainerLogic.adherenceSummary([w], range: .all)
+        XCTAssertEqual(s.comparedWorkouts, 1)
+        XCTAssertEqual(s.plannedSets, 4)        // 3 + 1
+        XCTAssertEqual(s.doneSets, 3)           // min(4,3) + min(0,1)
+        XCTAssertEqual(s.skippedExercises, 1)
+        XCTAssertEqual(Int((s.ratio * 100).rounded()), 75)
+        XCTAssertTrue(s.hasData)
+    }
+
+    func testAdherenceIgnoresWorkoutsWithoutSnapshot() {
+        let w = TestFixtures.workout(
+            id: 1, clientID: "a", date: DateTools.localTodayISO(),
+            exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [TestFixtures.set()])]
+        )
+        let s = TrainerLogic.adherenceSummary([w], range: .all)
+        XCTAssertFalse(s.hasData)
+        XCTAssertEqual(s.comparedWorkouts, 0)
+    }
 }

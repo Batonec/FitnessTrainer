@@ -2511,6 +2511,9 @@ private struct ProgressTabScreen: View {
 
                     RingMainCard()
 
+                    volumeSection
+                    disciplineSection
+
                     sectionHeader
 
                     let options = store.progressExerciseOptions()
@@ -2575,6 +2578,158 @@ private struct ProgressTabScreen: View {
         }
         .padding(.horizontal, 4)
         .padding(.top, 6)
+    }
+
+    private func miniHeader(_ title: String, _ trailing: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.jbm(13, weight: .bold)).tracking(0.4)
+                .foregroundStyle(DesignPalette.ink3)
+            Spacer()
+            Text(trailing)
+                .font(.jbm(11, weight: .semibold))
+                .foregroundStyle(DesignPalette.ink4)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+    }
+
+    // MARK: weekly volume
+
+    private var volumeSection: some View {
+        let rows = TrainerLogic.weeklyVolumeByGroup(store.workouts)
+        return VStack(alignment: .leading, spacing: 8) {
+            miniHeader("ОБЪЁМ ПО ГРУППАМ", "7 дней")
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
+                    if idx > 0 {
+                        Rectangle().fill(DesignPalette.ink.opacity(0.06)).frame(height: 0.5)
+                    }
+                    VolumeRow(row: row)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
+            .glassCard(radius: 20)
+        }
+    }
+
+    // MARK: discipline (plan vs fact)
+
+    private var disciplineSection: some View {
+        let summary = TrainerLogic.adherenceSummary(store.workouts, range: store.selectedRange)
+        return VStack(alignment: .leading, spacing: 8) {
+            miniHeader("ДИСЦИПЛИНА", store.selectedRange.label)
+            DisciplineCard(summary: summary)
+        }
+    }
+}
+
+// One muscle-group volume row: name, set count vs landmark, a fill bar with a
+// tick at the lower landmark (where "достаточно" begins).
+private struct VolumeRow: View {
+    var row: MuscleGroupVolume
+
+    private var color: Color {
+        switch row.status {
+        case .under: return DesignPalette.ink4
+        case .onTarget: return DesignPalette.ok
+        case .over: return DesignPalette.warn
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(row.name)
+                    .font(.jbm(12.5, weight: .semibold))
+                    .foregroundStyle(DesignPalette.ink2)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text("\(row.count) / \(row.minTarget)–\(row.maxTarget)")
+                    .font(.jbm(11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(color)
+            }
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(DesignPalette.ink.opacity(0.07)).frame(height: 6)
+                    Capsule().fill(color).frame(width: max(6, w * row.fill), height: 6)
+                    Rectangle()
+                        .fill(DesignPalette.ink.opacity(0.28))
+                        .frame(width: 1, height: 11)
+                        .offset(x: w * min(1, Double(row.minTarget) / Double(max(1, row.maxTarget))))
+                }
+            }
+            .frame(height: 11)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+// Adherence summary: big percentage + a fill bar + context (workouts compared,
+// skipped exercises). Empty hint when nothing was done against a coach plan yet.
+private struct DisciplineCard: View {
+    var summary: AdherenceSummary
+
+    private var color: Color {
+        if summary.ratio >= 0.8 { return DesignPalette.ok }
+        if summary.ratio >= 0.5 { return DesignPalette.warn }
+        return DesignPalette.bad
+    }
+
+    var body: some View {
+        Group {
+            if summary.hasData {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("\(Int((summary.ratio * 100).rounded()))%")
+                            .font(.jbm(28, weight: .heavy)).tracking(-0.5)
+                            .foregroundStyle(DesignPalette.ink)
+                        Text("плана выполнено")
+                            .font(.jbm(12, weight: .semibold))
+                            .foregroundStyle(DesignPalette.ink3)
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(summary.comparedWorkouts) трен. по плану")
+                                .font(.jbm(11, weight: .semibold))
+                                .foregroundStyle(DesignPalette.ink2)
+                            if summary.skippedExercises > 0 {
+                                Text("пропущено упр.: \(summary.skippedExercises)")
+                                    .font(.jbm(10.5, weight: .medium))
+                                    .foregroundStyle(DesignPalette.warn)
+                            }
+                        }
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(DesignPalette.ink.opacity(0.07)).frame(height: 7)
+                            Capsule().fill(color).frame(width: max(7, geo.size.width * summary.ratio), height: 7)
+                        }
+                    }
+                    .frame(height: 7)
+                    Text("\(summary.doneSets) из \(summary.plannedSets) запланированных подходов")
+                        .font(.jbm(10.5, weight: .medium))
+                        .foregroundStyle(DesignPalette.ink3)
+                }
+                .padding(14)
+                .glassCard(radius: 20)
+            } else {
+                HStack(spacing: 11) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 18))
+                        .foregroundStyle(DesignPalette.ink4)
+                    Text("Пока нет тренировок по плану от тренера за этот период.")
+                        .font(.jbm(12, weight: .medium))
+                        .foregroundStyle(DesignPalette.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+                .glassCard(radius: 20)
+            }
+        }
     }
 }
 

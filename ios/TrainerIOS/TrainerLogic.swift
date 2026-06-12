@@ -724,6 +724,64 @@ enum TrainerLogic {
         return reps.map(String.init).joined(separator: ", ")
     }
 
+    // Muscle-group map + weekly set landmarks — mirrors the backend coaching
+    // policy (recommender.MUSCLE_GROUPS) so the Progress screen shows the same
+    // accounting the coach reasons over. Counting is by the exercise's primary
+    // muscle (same as the prompt's volume report).
+    static let muscleGroupLandmarks: [(name: String, ids: [Int], min: Int, max: Int)] = [
+        ("Грудь", [18, 1, 17], 10, 16),
+        ("Спина", [9, 4, 10], 10, 16),
+        ("Квадрицепс/ягод.", [8, 16], 10, 16),
+        ("Дельты", [13], 6, 12),
+        ("Бицепс", [11], 4, 8),
+        ("Трицепс", [12], 4, 8),
+        ("Бицепс бедра", [15], 5, 10),
+    ]
+
+    /// Work sets per muscle group over the last `days` (default 7) — the weekly
+    /// volume the coach tracks, with target landmarks for each group.
+    static func weeklyVolumeByGroup(_ workouts: [Workout], today: Date = Date(), days: Int = 7) -> [MuscleGroupVolume] {
+        let cal = Calendar.current
+        let end = cal.startOfDay(for: today)
+        guard let start = cal.date(byAdding: .day, value: -(days - 1), to: end) else { return [] }
+
+        var setsByID: [Int: Int] = [:]
+        for workout in workouts {
+            let d = cal.startOfDay(for: DateTools.date(from: workout.workoutDate))
+            guard d >= start && d <= end else { continue }
+            for ex in workout.data.exercises {
+                setsByID[ex.exerciseID, default: 0] += ex.sets.count
+            }
+        }
+        return muscleGroupLandmarks.map { group in
+            let count = group.ids.reduce(0) { $0 + (setsByID[$1] ?? 0) }
+            return MuscleGroupVolume(name: group.name, count: count, minTarget: group.min, maxTarget: group.max)
+        }
+    }
+
+    /// Plan-vs-performed adherence across workouts in `range` that carried a
+    /// recommendation snapshot. Done sets are capped at planned per exercise so
+    /// extra work doesn't inflate adherence past 100%.
+    static func adherenceSummary(_ workouts: [Workout], range: RangeOption) -> AdherenceSummary {
+        var compared = 0, planned = 0, done = 0, skipped = 0
+        for workout in getWorkoutsInRange(workouts, range: range) {
+            guard let plan = workout.data.recommendation?.exercises, !plan.isEmpty else { continue }
+            compared += 1
+            var doneByID: [Int: Int] = [:]
+            for ex in workout.data.exercises {
+                doneByID[ex.exerciseID, default: 0] += ex.sets.count
+            }
+            for plannedExercise in plan {
+                let target = plannedExercise.sets.count
+                let actual = doneByID[plannedExercise.exerciseID] ?? 0
+                planned += target
+                done += min(target, actual)
+                if actual == 0 { skipped += 1 }
+            }
+        }
+        return AdherenceSummary(comparedWorkouts: compared, plannedSets: planned, doneSets: done, skippedExercises: skipped)
+    }
+
     /// The most recently logged working weight (heaviest set) for an exercise
     /// across all history — the "было" half of the было→план delta. Nil if the
     /// exercise has never been logged.
