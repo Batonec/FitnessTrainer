@@ -307,6 +307,7 @@ final class TrainerStore: ObservableObject {
     func loadRecommendation() async {
         do {
             recommendation = try await APIClient(baseURLString: apiBaseURLString).fetchRecommendation()
+            autoApplyRecommendationIfReady()
         } catch {
             // ignore — the card just keeps its previous content (or stays hidden)
         }
@@ -325,6 +326,7 @@ final class TrainerStore: ObservableObject {
             ).refreshRecommendation()
             recommendation = response
             if response.status == "ready" {
+                autoApplyRecommendationIfReady()
                 showToast("Совет обновлён")
             }
         } catch {
@@ -339,6 +341,19 @@ final class TrainerStore: ObservableObject {
             )
             showToast(error.localizedDescription)
         }
+    }
+
+    /// Auto-apply the latest ready recommendation as today's plan — there is no
+    /// "Применить" button; every generated workout becomes the plan on its own.
+    /// Skips when editing a past workout (it must not claim today's plan) or when
+    /// this recommendation is already the applied plan. Silent (no toast): it runs
+    /// on every cached load and boot.
+    func autoApplyRecommendationIfReady() {
+        guard recommendation?.status == "ready",
+              recommendation?.recommendation != nil,
+              draft.editingWorkoutID == nil,
+              !isRecommendationApplied else { return }
+        applyRecommendationAsPlan()
     }
 
     /// Apply the coach recommendation as today's PLAN: per-exercise targets that
@@ -364,7 +379,6 @@ final class TrainerStore: ObservableObject {
             loadType: payload.loadType,
             exercises: planExercises
         )
-        showToast("План применён")
     }
 
     /// Catalog filter (when the catalog is loaded), de-dupe by exercise id,

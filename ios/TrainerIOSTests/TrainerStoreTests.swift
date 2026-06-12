@@ -67,6 +67,47 @@ final class TrainerStoreTests: XCTestCase {
         XCTAssertTrue(cards.allSatisfy(\.isPreview))
     }
 
+    func testAutoApplyAppliesReadyRecommendationAndIsIdempotent() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.recommendation = readyRecommendation()
+        XCTAssertNil(store.appliedPlan)
+
+        store.autoApplyRecommendationIfReady()
+        XCTAssertEqual(store.appliedPlan?.exercises.map(\.exerciseID), [8, 9])
+        XCTAssertTrue(store.isRecommendationApplied)
+
+        // Re-running (e.g. another cached load of the same rec) changes nothing.
+        store.autoApplyRecommendationIfReady()
+        XCTAssertEqual(store.appliedPlan?.exercises.map(\.exerciseID), [8, 9])
+    }
+
+    func testAutoApplySkipsWhileEditingPastWorkout() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.startEditing(TestFixtures.workout(
+            id: 42,
+            exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [TestFixtures.set()])]
+        ))
+        store.recommendation = readyRecommendation()
+
+        store.autoApplyRecommendationIfReady()
+        XCTAssertNil(store.appliedPlan)
+    }
+
+    func testAutoApplySkipsNonReadyRecommendation() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.recommendation = RecommendationResponse(
+            ok: true, status: "pending", stale: false,
+            basedOnWorkoutID: nil, basedOnWorkoutCount: nil, model: nil,
+            updatedAt: nil, error: nil, recommendation: nil
+        )
+
+        store.autoApplyRecommendationIfReady()
+        XCTAssertNil(store.appliedPlan)
+    }
+
     func testQuickAddFollowsAppliedPlanThenContinuesFromCustomSet() {
         let store = TrainerStore(defaults: .isolatedTestDefaults())
         store.exercises = TestFixtures.catalog

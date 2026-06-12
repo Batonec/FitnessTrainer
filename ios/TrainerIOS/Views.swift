@@ -921,9 +921,8 @@ struct CoachCard: View {
         }
     }
 
-    /// Three states: not applied → "Применить в план"; applied & current →
-    /// passive "В плане ✓"; a different plan is applied → "Применить новый"
-    /// (overwrites targets only — logged sets are untouched).
+    /// No "Применить" button — every generated recommendation auto-applies as the
+    /// plan. This is just a passive confirmation that the shown advice is the plan.
     @ViewBuilder
     private var applySlot: some View {
         if store.isRecommendationApplied {
@@ -937,21 +936,7 @@ struct CoachCard: View {
             .background(DesignPalette.ok.opacity(0.12), in: Capsule())
             .overlay(Capsule().stroke(DesignPalette.ok.opacity(0.25), lineWidth: 0.5))
         } else {
-            Button {
-                store.applyRecommendationAsPlan()
-            } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: "text.badge.plus").font(.system(size: 16, weight: .semibold))
-                    Text(store.appliedPlan == nil ? "Применить в план" : "Применить новый")
-                        .font(.jbm(14.5, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(DesignPalette.accent, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isRefreshingRecommendation)
+            Spacer()
         }
     }
 
