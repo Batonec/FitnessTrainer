@@ -285,6 +285,184 @@ final class TrainerLogicTests: XCTestCase {
         XCTAssertEqual(TrainerLogic.formatBodyWeight(81.95), "81,95")
     }
 
+    // MARK: - Applied coach plan
+
+    private func samplePlan() -> AppliedCoachPlan {
+        AppliedCoachPlan(
+            basedOnWorkoutID: 133,
+            basedOnWorkoutCount: 56,
+            model: "claude-opus-4-8",
+            generatedAt: 1781200000,
+            appliedAt: "2026-06-12",
+            focus: "Верх+низ",
+            loadType: "medium",
+            exercises: [
+                RecommendedExercise(
+                    exerciseID: 9, name: "Тяга верт.", note: nil,
+                    sets: [RecommendedSet(reps: 12, weight: 70)]
+                ),
+                RecommendedExercise(
+                    exerciseID: 8, name: "Жим ногами", note: "мягкий вход",
+                    sets: [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 10, weight: 95)]
+                )
+            ]
+        )
+    }
+
+    func testNextPlannedSetWalksPlanTargetsAndClampsOnExhaustion() {
+        let targets = [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 10, weight: 95)]
+
+        let first = TrainerLogic.nextPlannedSet(workouts: [], exerciseID: 8, draftSets: [], planTargets: targets)
+        XCTAssertEqual(first.reps, 12)
+        XCTAssertEqual(first.weight, 90)
+
+        let second = TrainerLogic.nextPlannedSet(
+            workouts: [], exerciseID: 8,
+            draftSets: [TestFixtures.draftSet(reps: 12, weight: 90)],
+            planTargets: targets
+        )
+        XCTAssertEqual(second.reps, 10)
+        XCTAssertEqual(second.weight, 95)
+
+        let exhausted = TrainerLogic.nextPlannedSet(
+            workouts: [], exerciseID: 8,
+            draftSets: [TestFixtures.draftSet(reps: 12, weight: 90), TestFixtures.draftSet(reps: 10, weight: 95)],
+            planTargets: targets
+        )
+        XCTAssertEqual(exhausted.reps, 10)
+        XCTAssertEqual(exhausted.weight, 95)
+    }
+
+    func testNextPlannedSetRepeatsCustomSetAndIgnoresEffortWithWeightEpsilon() {
+        let targets = [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 10, weight: 95)]
+
+        let afterCustom = TrainerLogic.nextPlannedSet(
+            workouts: [], exerciseID: 8,
+            draftSets: [TestFixtures.draftSet(reps: 8, weight: 100)],
+            planTargets: targets
+        )
+        XCTAssertEqual(afterCustom.reps, 8)
+        XCTAssertEqual(afterCustom.weight, 100)
+
+        // Effort/notes and sub-0.01 weight noise must NOT count as deviation.
+        let annotated = TrainerLogic.nextPlannedSet(
+            workouts: [], exerciseID: 8,
+            draftSets: [TestFixtures.draftSet(reps: 12, weight: 90.001, effort: .hard, notes: "x")],
+            planTargets: targets
+        )
+        XCTAssertEqual(annotated.reps, 10)
+        XCTAssertEqual(annotated.weight, 95)
+    }
+
+    func testNextPlannedSetWithoutPlanContinuesFromCustomElseHistory() {
+        let history = [
+            TestFixtures.workout(
+                exercises: [
+                    TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [
+                        TestFixtures.set(index: 1, reps: 10, weight: 80)
+                    ])
+                ]
+            )
+        ]
+
+        let fromHistory = TrainerLogic.nextPlannedSet(workouts: history, exerciseID: 8, draftSets: [], planTargets: nil)
+        XCTAssertEqual(fromHistory.reps, 11)
+        XCTAssertEqual(fromHistory.weight, 80)
+
+        // The original complaint: a custom set then "+" must not snap back to
+        // the history template — it continues from the custom set.
+        let afterCustom = TrainerLogic.nextPlannedSet(
+            workouts: history, exerciseID: 8,
+            draftSets: [TestFixtures.draftSet(reps: 6, weight: 120)],
+            planTargets: nil
+        )
+        XCTAssertEqual(afterCustom.reps, 6)
+        XCTAssertEqual(afterCustom.weight, 120)
+
+        let bare = TrainerLogic.nextPlannedSet(workouts: [], exerciseID: 8, draftSets: [], planTargets: nil)
+        XCTAssertEqual(bare.reps, 12)
+        XCTAssertEqual(bare.weight, 0)
+
+        let bareCustom = TrainerLogic.nextPlannedSet(
+            workouts: [], exerciseID: 8,
+            draftSets: [TestFixtures.draftSet(reps: 9, weight: 45)],
+            planTargets: nil
+        )
+        XCTAssertEqual(bareCustom.reps, 9)
+        XCTAssertEqual(bareCustom.weight, 45)
+    }
+
+    func testPlanDisplayCardsKeepRecommendedOrderAndAppendExtras() {
+        let draft = [
+            TestFixtures.draftExercise(id: 8, name: "Жим ногами", sets: [TestFixtures.draftSet()]),
+            TestFixtures.draftExercise(id: 11, name: "Бицепс", sets: [TestFixtures.draftSet()])
+        ]
+
+        let cards = TrainerLogic.planDisplayCards(plan: samplePlan(), draftExercises: draft)
+
+        XCTAssertEqual(cards.map(\.exerciseID), [9, 8, 11])
+        XCTAssertTrue(cards[0].isPreview)       // plan exercise without sets yet
+        XCTAssertFalse(cards[1].isPreview)      // plan exercise with logged sets
+        XCTAssertFalse(cards[2].isPreview)      // off-plan extra appended last
+    }
+
+    func testPlanProgressRatioAveragesAgainstPlanTargets() {
+        let plan = samplePlan() // ex9: 1 target, ex8: 2 targets
+
+        XCTAssertEqual(TrainerLogic.planProgressRatio(plan: plan, draftExercises: []), 0)
+
+        let halfLegPress = [TestFixtures.draftExercise(id: 8, name: "Жим ногами", sets: [TestFixtures.draftSet()])]
+        XCTAssertEqual(
+            TrainerLogic.planProgressRatio(plan: plan, draftExercises: halfLegPress),
+            0.25,
+            accuracy: 0.0001
+        )
+
+        let done = [
+            TestFixtures.draftExercise(id: 8, name: "Жим ногами", sets: [TestFixtures.draftSet(), TestFixtures.draftSet()]),
+            TestFixtures.draftExercise(id: 9, name: "Тяга верт.", sets: [TestFixtures.draftSet()])
+        ]
+        XCTAssertEqual(TrainerLogic.planProgressRatio(plan: plan, draftExercises: done), 1)
+    }
+
+    func testPlanPlanningContextShowsPlanTargetWithWeight() {
+        let context = TrainerLogic.planPlanningContext(
+            workouts: [],
+            exerciseID: 8,
+            planExercise: samplePlan().exercises[1]
+        )
+
+        XCTAssertEqual(context.plannedSets.map(\.reps), [12, 10])
+        XCTAssertEqual(context.progressionParts.first?.previousLabel, "—")
+        XCTAssertEqual(context.progressionParts.first?.nextLabel, "90кг ×12")
+    }
+
+    func testWorkoutPayloadEncodesRecommendationSnapshotInSnakeCase() throws {
+        let draft = TestFixtures.draft(
+            exercises: [TestFixtures.draftExercise(sets: [TestFixtures.draftSet()])]
+        )
+
+        let payload = TrainerLogic.workoutPayload(from: draft, recommendation: samplePlan().snapshot)
+        let data = try JSONEncoder().encode(payload)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let snapshot = (object?["data"] as? [String: Any])?["recommendation"] as? [String: Any]
+
+        XCTAssertNotNil(snapshot)
+        XCTAssertEqual(snapshot?["schema"] as? Int, 1)
+        XCTAssertEqual(snapshot?["source"] as? String, "coach")
+        XCTAssertEqual(snapshot?["generated_at"] as? Int, 1781200000)
+        XCTAssertEqual(snapshot?["load_type"] as? String, "medium")
+        let exercises = snapshot?["exercises"] as? [[String: Any]]
+        XCTAssertEqual(exercises?.first?["exercise_id"] as? Int, 9)
+        XCTAssertNil(exercises?.last?["note"])  // notes are stripped from snapshots
+
+        // No plan applied → the key must be absent entirely.
+        let plain = TrainerLogic.workoutPayload(from: draft)
+        let plainData = try JSONEncoder().encode(plain)
+        let plainObject = try JSONSerialization.jsonObject(with: plainData) as? [String: Any]
+        XCTAssertNil((plainObject?["data"] as? [String: Any])?["recommendation"])
+    }
+
     private func popularHistory() -> [Workout] {
         let core = [
             (8, "Жим ногами", 120.0, 15),

@@ -14,16 +14,15 @@ final class TrainerStoreTests: XCTestCase {
         XCTAssertFalse(store.isWorkoutBuilderPresented)
     }
 
-    func testApplyRecommendationToDraftLoadsValidExercisesAndSwitchesTab() {
-        let store = TrainerStore(defaults: .isolatedTestDefaults())
-        store.exercises = TestFixtures.catalog
-        store.currentTab = .history
-        store.recommendation = RecommendationResponse(
+    private func readyRecommendation() -> RecommendationResponse {
+        RecommendationResponse(
             ok: true,
             status: "ready",
             stale: false,
+            basedOnWorkoutID: 133,
             basedOnWorkoutCount: 10,
             model: "claude-opus-4-8",
+            updatedAt: 1781200000,
             error: nil,
             recommendation: RecommendationPayload(
                 focus: "Верх+низ",
@@ -32,7 +31,11 @@ final class TrainerStoreTests: XCTestCase {
                 exercises: [
                     RecommendedExercise(
                         exerciseID: 8, name: "Жим ногами", note: "n",
-                        sets: [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 12, weight: 90)]
+                        sets: [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 10, weight: 95)]
+                    ),
+                    RecommendedExercise(
+                        exerciseID: 9, name: "Тяга верт.", note: nil,
+                        sets: [RecommendedSet(reps: 12, weight: 70)]
                     ),
                     RecommendedExercise(
                         exerciseID: 999, name: "Выдумка", note: nil,
@@ -41,15 +44,82 @@ final class TrainerStoreTests: XCTestCase {
                 ]
             )
         )
+    }
 
-        store.applyRecommendationToDraft()
+    func testApplyRecommendationAsPlanDoesNotStartWorkoutAndFiltersCatalog() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.recommendation = readyRecommendation()
 
-        XCTAssertEqual(store.draft.exercises.map(\.exerciseID), [8])  // unknown id 999 dropped
-        XCTAssertEqual(store.draft.exercises.first?.exerciseName, "Жим ногами")
-        XCTAssertEqual(store.draft.exercises.first?.sets.count, 2)
-        XCTAssertEqual(store.draft.exercises.first?.sets.first?.weight, 90)
-        XCTAssertNil(store.draft.editingWorkoutID)
-        XCTAssertEqual(store.currentTab, .trainings)
+        store.applyRecommendationAsPlan()
+
+        // Plan captured (unknown id 999 dropped), but the draft is untouched:
+        // applying a plan must not look like a started workout.
+        XCTAssertEqual(store.appliedPlan?.exercises.map(\.exerciseID), [8, 9])
+        XCTAssertEqual(store.appliedPlan?.generatedAt, 1781200000)
+        XCTAssertTrue(store.draft.exercises.isEmpty)
+        XCTAssertFalse(store.draft.hasRealSets)
+        XCTAssertTrue(store.isRecommendationApplied)
+
+        // Display cards follow the recommended order as previews.
+        let cards = store.displayCards()
+        XCTAssertEqual(cards.map(\.exerciseID), [8, 9])
+        XCTAssertTrue(cards.allSatisfy(\.isPreview))
+    }
+
+    func testQuickAddFollowsAppliedPlanThenContinuesFromCustomSet() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.recommendation = readyRecommendation()
+        store.applyRecommendationAsPlan()
+
+        // First quick "+" takes the plan's first target.
+        store.addPlannedSet(exerciseID: 8)
+        XCTAssertEqual(store.draft.exercises.first?.sets.last?.reps, 12)
+        XCTAssertEqual(store.draft.exercises.first?.sets.last?.weight, 90)
+
+        // On-plan set logged → next quick "+" walks to target #2.
+        store.addPlannedSet(exerciseID: 8)
+        XCTAssertEqual(store.draft.exercises.first?.sets.last?.reps, 10)
+        XCTAssertEqual(store.draft.exercises.first?.sets.last?.weight, 95)
+
+        // Custom set → the next "+" repeats it instead of snapping back.
+        store.applySet(TestFixtures.draftSet(reps: 8, weight: 100, effort: .hard), exerciseID: 8, setIndex: nil)
+        store.addPlannedSet(exerciseID: 8)
+        XCTAssertEqual(store.draft.exercises.first?.sets.last?.reps, 8)
+        XCTAssertEqual(store.draft.exercises.first?.sets.last?.weight, 100)
+        XCTAssertNil(store.draft.exercises.first?.sets.last?.effort)
+    }
+
+    func testRemoveFromPlanAndResetPlan() {
+        let store = TrainerStore(defaults: .isolatedTestDefaults())
+        store.exercises = TestFixtures.catalog
+        store.recommendation = readyRecommendation()
+        store.applyRecommendationAsPlan()
+
+        store.removeFromPlan(exerciseID: 8)
+        XCTAssertEqual(store.appliedPlan?.exercises.map(\.exerciseID), [9])
+
+        // Dropping the last exercise drops the plan entirely.
+        store.removeFromPlan(exerciseID: 9)
+        XCTAssertNil(store.appliedPlan)
+
+        store.applyRecommendationAsPlan()
+        XCTAssertNotNil(store.appliedPlan)
+        store.resetAppliedPlan()
+        XCTAssertNil(store.appliedPlan)
+    }
+
+    func testAppliedPlanPersistsAcrossStoreInstances() {
+        let defaults = UserDefaults.isolatedTestDefaults()
+        let store = TrainerStore(defaults: defaults)
+        store.exercises = TestFixtures.catalog
+        store.recommendation = readyRecommendation()
+        store.applyRecommendationAsPlan()
+
+        let restored = TrainerStore(defaults: defaults)
+        XCTAssertEqual(restored.appliedPlan?.exercises.map(\.exerciseID), [8, 9])
+        XCTAssertEqual(restored.appliedPlan?.focus, "Верх+низ")
     }
 
     func testStoreMigratesLegacyLocalBackendURLToProduction() {

@@ -917,12 +917,33 @@ struct CoachCard: View {
             .buttonStyle(.plain)
             .disabled(store.isRefreshingRecommendation)
 
+            applySlot
+        }
+    }
+
+    /// Three states: not applied → "Применить в план"; applied & current →
+    /// passive "В плане ✓"; a different plan is applied → "Применить новый"
+    /// (overwrites targets only — logged sets are untouched).
+    @ViewBuilder
+    private var applySlot: some View {
+        if store.isRecommendationApplied {
+            HStack(spacing: 9) {
+                Image(systemName: "checkmark").font(.system(size: 15, weight: .bold))
+                Text("В плане").font(.jbm(14.5, weight: .bold))
+            }
+            .foregroundStyle(DesignPalette.ok)
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .background(DesignPalette.ok.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(DesignPalette.ok.opacity(0.25), lineWidth: 0.5))
+        } else {
             Button {
-                store.applyRecommendationToDraft()
+                store.applyRecommendationAsPlan()
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "text.badge.plus").font(.system(size: 16, weight: .semibold))
-                    Text("Применить в план").font(.jbm(14.5, weight: .bold))
+                    Text(store.appliedPlan == nil ? "Применить в план" : "Применить новый")
+                        .font(.jbm(14.5, weight: .bold))
                 }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -930,6 +951,7 @@ struct CoachCard: View {
                 .background(DesignPalette.accent, in: Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(store.isRefreshingRecommendation)
         }
     }
 
@@ -1137,6 +1159,8 @@ private struct TodayScreen: View {
                     sectionHeader("Редактируем", right: sessionSummary)
                 } else if store.draft.hasRealSets {
                     sectionHeader("Упражнения", right: sessionSummary)
+                } else if store.appliedPlan != nil {
+                    sectionHeader("План от тренера", right: resetPlanButton)
                 } else {
                     sectionHeader("План тренировки", right: nil)
                 }
@@ -1202,6 +1226,16 @@ private struct TodayScreen: View {
             isPresented: actionDialogBinding,
             titleVisibility: .visible
         ) {
+            if let pendingActionExercise,
+               pendingActionExercise.sets.isEmpty,
+               store.draft.editingWorkoutID == nil,
+               store.appliedPlan?.targets(for: pendingActionExercise.exerciseID) != nil {
+                Button("Убрать из плана", role: .destructive) {
+                    withAnimation { store.removeFromPlan(exerciseID: pendingActionExercise.exerciseID) }
+                    self.pendingActionExercise = nil
+                }
+            }
+
             Button("Удалить последний сет", role: .destructive) {
                 if let pendingActionExercise {
                     withAnimation { store.removeLastSet(exerciseID: pendingActionExercise.exerciseID) }
@@ -1358,10 +1392,35 @@ private struct TodayScreen: View {
     private var sessionSummary: AnyView {
         let totalExercises = store.displayCards().filter { !$0.sets.isEmpty }.count
         let totalSets = store.draft.exercises.reduce(0) { $0 + $1.sets.count }
+        let label: String
+        if store.draft.editingWorkoutID == nil,
+           let plan = store.appliedPlan {
+            // Against an applied coach plan show progress vs the plan's volume.
+            let planTotal = plan.exercises.reduce(0) { $0 + $1.sets.count }
+            label = "\(totalExercises) упр · \(min(totalSets, planTotal))/\(planTotal) сет"
+        } else {
+            label = "\(totalExercises) упр · \(totalSets) сет"
+        }
         return AnyView(
-            Text("\(totalExercises) упр · \(totalSets) сет")
+            Text(label)
                 .font(.jbm(12, weight: .semibold))
                 .foregroundStyle(DesignPalette.ink3)
+        )
+    }
+
+    private var resetPlanButton: AnyView {
+        AnyView(
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                    store.resetAppliedPlan()
+                }
+            } label: {
+                Text("Сбросить")
+                    .font(.jbm(12, weight: .semibold))
+                    .foregroundStyle(DesignPalette.ink3)
+                    .underline()
+            }
+            .buttonStyle(.plain)
         )
     }
 
@@ -1504,7 +1563,6 @@ private struct TodayExerciseCard: View {
     var onEditLast: () -> Void
     var onLongPress: () -> Void
 
-    @State private var didLongPressPlus = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -1587,33 +1645,34 @@ private struct TodayExerciseCard: View {
         .buttonStyle(.plain)
     }
 
+    // Plain view + tap/long-press gestures: a `Button` wrapper swallows the
+    // long press (its tap interaction wins), which made the set constructor
+    // unreachable from the "+" on devices.
     private var plusButton: some View {
-        Button {
-            if didLongPressPlus { didLongPressPlus = false }
-            else { onAdd() }
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(DesignPalette.accent)
-                Image(systemName: "plus")
-                    .font(.jbm(18, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 42, height: 42)
-            .shadow(color: DesignPalette.accent.opacity(0.33), radius: 10, y: 5)
-            .overlay(
-                Circle()
-                    .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
-                    .blendMode(.plusLighter)
-            )
+        ZStack {
+            Circle()
+                .fill(DesignPalette.accent)
+            Image(systemName: "plus")
+                .font(.jbm(18, weight: .bold))
+                .foregroundStyle(.white)
         }
-        .buttonStyle(.plain)
-        .onLongPressGesture(minimumDuration: 0.38, maximumDistance: 10) {
-            didLongPressPlus = true
+        .frame(width: 42, height: 42)
+        .shadow(color: DesignPalette.accent.opacity(0.33), radius: 10, y: 5)
+        .overlay(
+            Circle()
+                .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
+                .blendMode(.plusLighter)
+        )
+        .contentShape(Circle())
+        .accessibilityLabel("Добавить подход")
+        .accessibilityHint("Долгое нажатие — свой вес и повторы")
+        .onTapGesture {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onAdd()
+        }
+        .onLongPressGesture(minimumDuration: 0.38, maximumDistance: 12) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             onManual()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                didLongPressPlus = false
-            }
         }
     }
 }

@@ -143,12 +143,14 @@ struct WorkoutData: Codable, Hashable {
     var notes: String?
     var loadType: String?
     var exercises: [LoggedExercise]
+    var recommendation: RecommendationSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case focus
         case notes
         case loadType = "load_type"
         case exercises
+        case recommendation
     }
 }
 
@@ -265,14 +267,18 @@ struct RecommendationResponse: Codable {
     var ok: Bool?
     var status: String?            // none | pending | ready | failed
     var stale: Bool?
+    var basedOnWorkoutID: Int?
     var basedOnWorkoutCount: Int?
     var model: String?
+    var updatedAt: Int?            // generation identity (the row id is constant per user)
     var error: String?
     var recommendation: RecommendationPayload?
 
     enum CodingKeys: String, CodingKey {
         case ok, status, stale, model, error, recommendation
+        case basedOnWorkoutID = "based_on_workout_id"
         case basedOnWorkoutCount = "based_on_workout_count"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -309,6 +315,76 @@ struct RecommendedExercise: Codable, Hashable, Identifiable {
 struct RecommendedSet: Codable, Hashable {
     var reps: Int
     var weight: Double
+}
+
+/// The coach recommendation the user applied as today's workout plan.
+/// Captured AT APPLY TIME (the backend keeps one mutable recommendations row
+/// per user, so the live row may be regenerated between apply and save).
+/// Lives in TrainerStore (persisted in UserDefaults) until the workout is saved
+/// or the plan is reset. Applying a plan must NOT create real draft sets.
+struct AppliedCoachPlan: Codable, Hashable {
+    var basedOnWorkoutID: Int?
+    var basedOnWorkoutCount: Int?
+    var model: String?
+    var generatedAt: Int?
+    var appliedAt: String
+    var focus: String
+    var loadType: String
+    var exercises: [RecommendedExercise]
+
+    func targets(for exerciseID: Int) -> [RecommendedSet]? {
+        exercises.first(where: { $0.exerciseID == exerciseID })?.sets
+    }
+
+    /// Lean snapshot for the saved workout: per-exercise notes are display-only
+    /// and intentionally stripped (stats only need targets).
+    var snapshot: RecommendationSnapshot {
+        RecommendationSnapshot(
+            schema: 1,
+            source: "coach",
+            model: model,
+            generatedAt: generatedAt,
+            appliedAt: appliedAt,
+            basedOnWorkoutID: basedOnWorkoutID,
+            basedOnWorkoutCount: basedOnWorkoutCount,
+            focus: focus,
+            loadType: loadType,
+            exercises: exercises.map {
+                RecommendedExercise(exerciseID: $0.exerciseID, name: $0.name, note: nil, sets: $0.sets)
+            }
+        )
+    }
+}
+
+/// Lean copy of the recommendation persisted inside a saved workout's payload
+/// (`data.recommendation`) so stats can later compare actual vs recommended.
+/// The recommendations table is one-overwritten-row-per-user, so a snapshot —
+/// not an id reference — is the only stable link. Generation identity =
+/// (based_on_workout_id, generated_at, model).
+struct RecommendationSnapshot: Codable, Hashable {
+    var schema: Int?
+    var source: String?
+    var model: String?
+    var generatedAt: Int?
+    var appliedAt: String?
+    var basedOnWorkoutID: Int?
+    var basedOnWorkoutCount: Int?
+    var focus: String?
+    var loadType: String?
+    var exercises: [RecommendedExercise]?
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case source
+        case model
+        case generatedAt = "generated_at"
+        case appliedAt = "applied_at"
+        case basedOnWorkoutID = "based_on_workout_id"
+        case basedOnWorkoutCount = "based_on_workout_count"
+        case focus
+        case loadType = "load_type"
+        case exercises
+    }
 }
 
 struct DraftWorkout: Codable, Hashable {

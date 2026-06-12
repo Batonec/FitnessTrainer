@@ -188,6 +188,47 @@ enum TrainerLogic {
         return cards
     }
 
+    /// Display cards when a coach plan is applied: plan exercises in the
+    /// recommended ORDER (merged with logged draft sets), then any extra
+    /// exercises the user added outside the plan.
+    static func planDisplayCards(
+        plan: AppliedCoachPlan,
+        draftExercises: [DraftExercise]
+    ) -> [DraftDisplayExercise] {
+        let actualByID = Dictionary(uniqueKeysWithValues: draftExercises.map { ($0.exerciseID, $0) })
+        var usedActualIDs = Set<Int>()
+        var cards: [DraftDisplayExercise] = plan.exercises.map { planned in
+            if let actual = actualByID[planned.exerciseID] {
+                usedActualIDs.insert(actual.exerciseID)
+                return DraftDisplayExercise(
+                    exerciseID: actual.exerciseID,
+                    exerciseName: actual.exerciseName,
+                    sets: actual.sets,
+                    isPreview: false
+                )
+            }
+            return DraftDisplayExercise(
+                exerciseID: planned.exerciseID,
+                exerciseName: planned.name,
+                sets: [],
+                isPreview: true
+            )
+        }
+
+        for actual in draftExercises where !usedActualIDs.contains(actual.exerciseID) {
+            cards.append(
+                DraftDisplayExercise(
+                    exerciseID: actual.exerciseID,
+                    exerciseName: actual.exerciseName,
+                    sets: actual.sets,
+                    isPreview: false
+                )
+            )
+        }
+
+        return cards
+    }
+
     static func availableRareExercises(
         exercises: [ExerciseDefinition],
         workouts: [Workout],
@@ -392,6 +433,82 @@ enum TrainerLogic {
         )
     }
 
+    /// Planning context when the exercise's targets come from an applied coach
+    /// plan: the green target shows the plan's weight AND reps (the coach may
+    /// change the weight, unlike the history-based +1-rep plan). Never nil —
+    /// the plan itself is the target even without past performances.
+    static func planPlanningContext(
+        workouts: [Workout],
+        exerciseID: Int,
+        planExercise: RecommendedExercise,
+        excludeWorkoutID: Int? = nil
+    ) -> ExercisePlanningContext {
+        let source = latestExerciseSource(
+            workouts: workouts,
+            exerciseID: exerciseID,
+            excludeWorkoutID: excludeWorkoutID
+        )
+        let previousSets = source.map { normalizedExerciseSets($0.exercise.sets, incrementReps: 0) } ?? []
+
+        let plannedSets = planExercise.sets.enumerated().map { index, target in
+            WorkoutSet(
+                setIndex: index + 1,
+                reps: target.reps,
+                weight: target.weight,
+                effort: nil,
+                notes: nil
+            )
+        }
+
+        let previousSummary = summarizeExerciseSets(previousSets)
+        let plannedSummary = summarizeExerciseSets(plannedSets)
+
+        let progressionParts = plannedSummary.segments.enumerated().map { index, segment -> ReferenceProgressionPart in
+            let previousSegment = index < previousSummary.segments.count
+                ? previousSummary.segments[index]
+                : previousSummary.segments.last
+            return ReferenceProgressionPart(
+                previousLabel: previousSegment.map {
+                    "\(formatWeight($0.weight))кг ×\(summarizeRepRuns($0.reps))"
+                } ?? "—",
+                nextLabel: "\(formatWeight(segment.weight))кг ×\(summarizeRepRuns(segment.reps))",
+                previousEffort: previousSegment?.effort
+            )
+        }
+
+        return ExercisePlanningContext(
+            workoutID: source?.workout.id,
+            workoutDate: source?.workout.workoutDate ?? "",
+            exerciseName: planExercise.name,
+            previousSets: previousSets,
+            plannedSets: plannedSets,
+            previousSummary: previousSummary,
+            plannedSummary: plannedSummary,
+            progressionParts: progressionParts,
+            maxWeight: previousSets.map(\.weight).max() ?? 0
+        )
+    }
+
+    /// Ring progress against an applied coach plan: fraction of target sets
+    /// done per plan exercise, averaged over the plan.
+    static func planProgressRatio(
+        plan: AppliedCoachPlan,
+        draftExercises: [DraftExercise]
+    ) -> Double {
+        guard draftExercises.contains(where: { !$0.sets.isEmpty }), !plan.exercises.isEmpty else {
+            return 0
+        }
+
+        let actualByID = Dictionary(uniqueKeysWithValues: draftExercises.map { ($0.exerciseID, $0) })
+        let total = plan.exercises.reduce(0.0) { partial, exercise in
+            let targetCount = max(1, exercise.sets.count)
+            let actualCount = actualByID[exercise.exerciseID]?.sets.count ?? 0
+            return partial + min(Double(actualCount), Double(targetCount)) / Double(targetCount)
+        }
+
+        return max(0, min(1, total / Double(plan.exercises.count)))
+    }
+
     static func plannedSet(
         workouts: [Workout],
         exerciseID: Int,
@@ -409,6 +526,73 @@ enum TrainerLogic {
 
         let template = context.plannedSets[min(index, context.plannedSets.count - 1)]
         return DraftSet(reps: template.reps, weight: template.weight, effort: nil, notes: nil)
+    }
+
+    /// Single source of truth for what the quick "+" (and the editor prefill)
+    /// should propose next for an exercise.
+    ///
+    /// Priority:
+    /// 1. The last logged draft set was CUSTOM (deviates from its template) →
+    ///    continue from that set, not from the template.
+    /// 2. An applied coach plan covers the exercise → its target for the next index.
+    /// 3. History-based plan (last performance, +1 rep per set).
+    /// 4. Fallback 12 × 0.
+    static func nextPlannedSet(
+        workouts: [Workout],
+        exerciseID: Int,
+        draftSets: [DraftSet],
+        planTargets: [RecommendedSet]?,
+        excludeWorkoutID: Int? = nil
+    ) -> DraftSet {
+        let templates = setTemplates(
+            workouts: workouts,
+            exerciseID: exerciseID,
+            planTargets: planTargets,
+            excludeWorkoutID: excludeWorkoutID
+        )
+
+        func template(at index: Int) -> DraftSet? {
+            guard !templates.isEmpty else { return nil }
+            let clamped = templates[min(max(0, index), templates.count - 1)]
+            return DraftSet(reps: clamped.reps, weight: clamped.weight, effort: nil, notes: nil)
+        }
+
+        if let last = draftSets.last {
+            let lastIndex = draftSets.count - 1
+            // Effort/notes never count as deviation; weight gets an epsilon so
+            // JSON doubles vs ±2.5 stepper arithmetic can't cause phantom drift.
+            if let expected = template(at: lastIndex),
+               expected.reps == last.reps, abs(expected.weight - last.weight) < 0.01 {
+                // On template — keep walking the plan.
+                return template(at: draftSets.count)
+                    ?? DraftSet(reps: last.reps, weight: last.weight, effort: nil, notes: nil)
+            }
+            // Custom set — repeat it instead of snapping back to the template.
+            return DraftSet(reps: last.reps, weight: last.weight, effort: nil, notes: nil)
+        }
+
+        return template(at: 0) ?? DraftSet(reps: 12, weight: 0, effort: nil, notes: nil)
+    }
+
+    private static func setTemplates(
+        workouts: [Workout],
+        exerciseID: Int,
+        planTargets: [RecommendedSet]?,
+        excludeWorkoutID: Int?
+    ) -> [DraftSet] {
+        if let planTargets, !planTargets.isEmpty {
+            return planTargets.map { DraftSet(reps: $0.reps, weight: $0.weight, effort: nil, notes: nil) }
+        }
+
+        guard let context = planningContext(
+            workouts: workouts,
+            exerciseID: exerciseID,
+            excludeWorkoutID: excludeWorkoutID
+        ) else {
+            return []
+        }
+
+        return context.plannedSets.map { DraftSet(reps: $0.reps, weight: $0.weight, effort: nil, notes: nil) }
     }
 
     static func summarizeExerciseSets(_ sets: [WorkoutSet]) -> ExerciseSetSummary {
@@ -489,7 +673,10 @@ enum TrainerLogic {
         return "light"
     }
 
-    static func workoutPayload(from draft: DraftWorkout) -> Workout {
+    static func workoutPayload(
+        from draft: DraftWorkout,
+        recommendation: RecommendationSnapshot? = nil
+    ) -> Workout {
         let exercises = draft.exercises
             .filter { !$0.sets.isEmpty }
             .map { exercise in
@@ -513,7 +700,8 @@ enum TrainerLogic {
                 focus: nil,
                 notes: nil,
                 loadType: inferLoadType(draft.exercises),
-                exercises: exercises
+                exercises: exercises,
+                recommendation: recommendation
             )
         )
     }

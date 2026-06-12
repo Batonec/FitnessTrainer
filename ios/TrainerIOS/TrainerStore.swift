@@ -43,6 +43,9 @@ final class TrainerStore: ObservableObject {
 
     @Published var recommendation: RecommendationResponse?
     @Published var isRefreshingRecommendation = false
+    @Published var appliedPlan: AppliedCoachPlan? {
+        didSet { persistAppliedPlan() }
+    }
 
     private let defaults: UserDefaults
     private var toastTask: Task<Void, Never>?
@@ -55,6 +58,7 @@ final class TrainerStore: ObservableObject {
         self.selectedProgressExerciseID = defaults.object(forKey: Keys.progressExercise) as? Int
         self.apiBaseURLString = Self.normalizedBackendURL(defaults.string(forKey: Keys.apiBaseURL))
         self.draft = Self.readDraft(defaults: defaults)
+        self.appliedPlan = Self.readAppliedPlan(defaults: defaults)
         self.bodyWeightDate = DateTools.localTodayISO()
     }
 
@@ -248,7 +252,11 @@ final class TrainerStore: ObservableObject {
     }
 
     func saveDraftWorkout() async {
-        let payload = TrainerLogic.workoutPayload(from: draft)
+        // The applied plan is stamped onto NEW workouts only: editing an old
+        // workout must neither claim today's plan nor consume it.
+        let wasNewWorkout = draft.editingWorkoutID == nil
+        let snapshot = wasNewWorkout ? appliedPlan?.snapshot : nil
+        let payload = TrainerLogic.workoutPayload(from: draft, recommendation: snapshot)
         guard !payload.data.exercises.isEmpty else {
             showToast("Добавь хотя бы одно упражнение")
             return
@@ -277,6 +285,16 @@ final class TrainerStore: ObservableObject {
             resetDraft()
             isWorkoutBuilderPresented = false
             ensureSelectedProgressExercise()
+            if wasNewWorkout {
+                // Plan consumed; backend regenerates the recommendation in the
+                // background — pick up "pending" now and the fresh one later.
+                appliedPlan = nil
+                Task { [weak self] in await self?.loadRecommendation() }
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 25_000_000_000)
+                    await self?.loadRecommendation()
+                }
+            }
         } catch {
             showToast(error.localizedDescription)
         }
@@ -323,40 +341,101 @@ final class TrainerStore: ObservableObject {
         }
     }
 
-    /// Load the recommended exercises into the draft plan. Unknown catalog ids are
-    /// dropped by `ensureDraftExerciseDefinitions` (server already validates, so
-    /// there shouldn't be any).
-    func applyRecommendationToDraft() {
-        guard let payload = recommendation?.recommendation, !payload.exercises.isEmpty else { return }
-        draft = DraftWorkout(
-            workoutDate: DateTools.localTodayISO(),
-            exercises: payload.exercises.map { exercise in
-                DraftExercise(
-                    exerciseID: exercise.exerciseID,
-                    exerciseName: exercise.name,
-                    sets: exercise.sets.map {
-                        DraftSet(reps: $0.reps, weight: $0.weight, effort: nil, notes: nil)
-                    }
-                )
-            },
-            editingWorkoutID: nil,
-            editingClientID: nil
+    /// Apply the coach recommendation as today's PLAN: per-exercise targets that
+    /// drive the preview cards, the quick "+" and progress. Deliberately does NOT
+    /// create real draft sets — the workout starts only when the user logs a set.
+    /// The plan is captured at apply time because the backend's recommendations
+    /// row is mutable and may be regenerated before the workout is saved.
+    func applyRecommendationAsPlan() {
+        guard let response = recommendation,
+              let payload = response.recommendation,
+              !payload.exercises.isEmpty else { return }
+
+        let planExercises = sanitizedPlanExercises(payload)
+        guard !planExercises.isEmpty else { return }
+
+        appliedPlan = AppliedCoachPlan(
+            basedOnWorkoutID: response.basedOnWorkoutID,
+            basedOnWorkoutCount: response.basedOnWorkoutCount,
+            model: response.model,
+            generatedAt: response.updatedAt,
+            appliedAt: DateTools.localTodayISO(),
+            focus: payload.focus,
+            loadType: payload.loadType,
+            exercises: planExercises
         )
-        ensureDraftExerciseDefinitions()
-        currentTab = .trainings
         showToast("План применён")
+    }
+
+    /// Catalog filter (when the catalog is loaded), de-dupe by exercise id,
+    /// drop zero-set entries, clamp reps/weight to sane bounds.
+    private func sanitizedPlanExercises(_ payload: RecommendationPayload) -> [RecommendedExercise] {
+        let knownIDs = Set(exercises.map(\.id))
+        var seen = Set<Int>()
+        return payload.exercises.compactMap { exercise in
+            guard !exercise.sets.isEmpty,
+                  seen.insert(exercise.exerciseID).inserted,
+                  exercises.isEmpty || knownIDs.contains(exercise.exerciseID) else {
+                return nil
+            }
+            return RecommendedExercise(
+                exerciseID: exercise.exerciseID,
+                name: exercise.name,
+                note: exercise.note,
+                sets: exercise.sets.map {
+                    RecommendedSet(reps: max(1, $0.reps), weight: max(0, $0.weight))
+                }
+            )
+        }
+    }
+
+    /// Drop the applied coach plan and return to the history-based heuristic plan.
+    /// Logged draft sets are untouched.
+    func resetAppliedPlan() {
+        guard appliedPlan != nil else { return }
+        appliedPlan = nil
+        showToast("План сброшен")
+    }
+
+    /// Remove a single (not yet started) exercise from the applied plan.
+    /// Dropping the last exercise drops the whole plan.
+    func removeFromPlan(exerciseID: Int) {
+        guard var plan = appliedPlan else { return }
+        plan.exercises.removeAll { $0.exerciseID == exerciseID }
+        appliedPlan = plan.exercises.isEmpty ? nil : plan
+    }
+
+    /// True when the currently shown recommendation is the one already applied
+    /// as the plan (drives the CoachCard button state). Compared by CONTENT:
+    /// the backend keeps one recommendations row per user, so its id does not
+    /// change across regenerations and can't tell old from new.
+    var isRecommendationApplied: Bool {
+        guard let appliedPlan, let payload = recommendation?.recommendation else { return false }
+        return appliedPlan.focus == payload.focus
+            && appliedPlan.exercises == sanitizedPlanExercises(payload)
     }
 
     func addPlannedSet(exerciseID: Int) {
         guard let exercise = exerciseDefinition(id: exerciseID) else { return }
-        let currentSets = draft.exercises.first(where: { $0.exerciseID == exerciseID })?.sets.count ?? 0
-        let planned = TrainerLogic.plannedSet(
+        addSet(nextPlannedSet(exerciseID: exerciseID), to: exercise)
+    }
+
+    /// What the quick "+" / editor prefill proposes next for this exercise:
+    /// custom-set continuation > applied-plan target > history+1 > fallback.
+    func nextPlannedSet(exerciseID: Int) -> DraftSet {
+        TrainerLogic.nextPlannedSet(
             workouts: workouts,
             exerciseID: exerciseID,
-            draftSetIndex: currentSets,
+            draftSets: draft.exercises.first(where: { $0.exerciseID == exerciseID })?.sets ?? [],
+            planTargets: activePlanTargets(for: exerciseID),
             excludeWorkoutID: draft.editingWorkoutID
         )
-        addSet(planned, to: exercise)
+    }
+
+    /// Plan targets apply only to today's draft — not when editing an old workout.
+    private func activePlanTargets(for exerciseID: Int) -> [RecommendedSet]? {
+        guard draft.editingWorkoutID == nil else { return nil }
+        return appliedPlan?.targets(for: exerciseID)
     }
 
     func applySet(_ set: DraftSet, exerciseID: Int, setIndex: Int?) {
@@ -385,7 +464,10 @@ final class TrainerStore: ObservableObject {
     }
 
     func displayCards() -> [DraftDisplayExercise] {
-        TrainerLogic.draftDisplayCards(
+        if let appliedPlan, draft.editingWorkoutID == nil {
+            return TrainerLogic.planDisplayCards(plan: appliedPlan, draftExercises: draft.exercises)
+        }
+        return TrainerLogic.draftDisplayCards(
             exercises: exercises,
             workouts: workouts,
             draftExercises: draft.exercises
@@ -410,7 +492,10 @@ final class TrainerStore: ObservableObject {
     }
 
     func draftProgressRatio() -> Double {
-        TrainerLogic.draftProgressRatio(
+        if let appliedPlan, draft.editingWorkoutID == nil {
+            return TrainerLogic.planProgressRatio(plan: appliedPlan, draftExercises: draft.exercises)
+        }
+        return TrainerLogic.draftProgressRatio(
             exercises: exercises,
             workouts: workouts,
             draftExercises: draft.exercises,
@@ -419,7 +504,16 @@ final class TrainerStore: ObservableObject {
     }
 
     func planningContext(for exerciseID: Int) -> ExercisePlanningContext? {
-        TrainerLogic.planningContext(
+        if draft.editingWorkoutID == nil,
+           let planExercise = appliedPlan?.exercises.first(where: { $0.exerciseID == exerciseID }) {
+            return TrainerLogic.planPlanningContext(
+                workouts: workouts,
+                exerciseID: exerciseID,
+                planExercise: planExercise,
+                excludeWorkoutID: nil
+            )
+        }
+        return TrainerLogic.planningContext(
             workouts: workouts,
             exerciseID: exerciseID,
             excludeWorkoutID: draft.editingWorkoutID
@@ -427,13 +521,7 @@ final class TrainerStore: ObservableObject {
     }
 
     func plannedSetForEditor(exerciseID: Int) -> DraftSet {
-        let currentSets = draft.exercises.first(where: { $0.exerciseID == exerciseID })?.sets.count ?? 0
-        return TrainerLogic.plannedSet(
-            workouts: workouts,
-            exerciseID: exerciseID,
-            draftSetIndex: currentSets,
-            excludeWorkoutID: draft.editingWorkoutID
-        )
+        nextPlannedSet(exerciseID: exerciseID)
     }
 
     func exerciseDefinition(id: Int) -> ExerciseDefinition? {
@@ -575,6 +663,21 @@ final class TrainerStore: ObservableObject {
         return draft
     }
 
+    private func persistAppliedPlan() {
+        guard let appliedPlan else {
+            defaults.removeObject(forKey: Keys.appliedPlan)
+            return
+        }
+        if let data = try? JSONEncoder().encode(appliedPlan) {
+            defaults.set(data, forKey: Keys.appliedPlan)
+        }
+    }
+
+    private static func readAppliedPlan(defaults: UserDefaults) -> AppliedCoachPlan? {
+        guard let data = defaults.data(forKey: Keys.appliedPlan) else { return nil }
+        return try? JSONDecoder().decode(AppliedCoachPlan.self, from: data)
+    }
+
     private static func normalizedBackendURL(_ storedURL: String?) -> String {
         let localDevelopmentURL = "http://127.0.0.1:8080"
         let localHostURL = "http://localhost:8080"
@@ -597,6 +700,7 @@ final class TrainerStore: ObservableObject {
 private enum Keys {
     static let apiBaseURL = "trainer-ios-api-base-url-v1"
     static let draft = "trainer-ios-draft-v1"
+    static let appliedPlan = "trainer-ios-applied-plan-v1"
     static let currentTab = "trainer-ios-tab-v1"
     static let progressRange = "trainer-ios-progress-range-v1"
     static let bodyWeightRange = "trainer-ios-body-weight-range-v1"
