@@ -67,6 +67,11 @@ _STATIC_DIR = Path(
     or os.getenv("MINIAPP_STATIC_DIR")
     or str(Path(_BACKEND_DIR) / "static")
 )
+_PROFILE_PATH = Path(
+    os.getenv("COACH_MCP_PROFILE_PATH")
+    or os.getenv("COACH_PROFILE_PATH")
+    or str(_DB_PATH.parent / "coach_profile.json")
+)
 _DEFAULT_USER_ID = int(
     os.getenv("COACH_MCP_USER_ID")
     or os.getenv("MINIAPP_TELEGRAM_RECOVERY_USER_ID")
@@ -241,13 +246,15 @@ def coach_preview_prompt(limit: int = 20, user_id: int | None = None) -> CallToo
         catalog = _catalog()
         workouts = STORE.list_workouts(uid)
         body_weights = STORE.list_body_weights(uid)
-        system = recommender._build_system_prompt(catalog)
+        profile = recommender.load_profile(_PROFILE_PATH)
+        system = recommender._build_system_prompt(catalog, profile)
         user = recommender._build_user_prompt(workouts, body_weights, date.today(), limit)
         schema = recommender._build_schema(catalog)
         return _result(
             {
                 "ok": True,
                 "summary": "Промпт собран (без обращения к модели).",
+                "profile_loaded": profile is not None,
                 "user_id": uid,
                 "model": recommender.DEFAULT_MODEL,
                 "history_used": min(limit, len(workouts)),
@@ -275,7 +282,8 @@ def coach_debug_recommendation(limit: int = 20, user_id: int | None = None) -> C
         if not workouts:
             return _result(_err("Нет истории тренировок для генерации."))
         body_weights = STORE.list_body_weights(uid)
-        system = recommender._build_system_prompt(catalog)
+        profile = recommender.load_profile(_PROFILE_PATH)
+        system = recommender._build_system_prompt(catalog, profile)
         user = recommender._build_user_prompt(workouts, body_weights, date.today(), limit)
         schema = recommender._build_schema(catalog)
         model = recommender.DEFAULT_MODEL
@@ -329,7 +337,11 @@ def coach_generate_recommendation(
         body_weights = STORE.list_body_weights(uid)
         catalog = _catalog()
         recommendation, usage, model = recommender.generate(
-            workouts, body_weights, catalog, history_limit=limit
+            workouts,
+            body_weights,
+            catalog,
+            profile=recommender.load_profile(_PROFILE_PATH),
+            history_limit=limit,
         )
         stored = None
         if store:

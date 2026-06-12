@@ -30,6 +30,9 @@ DEFAULT_DEBUG_USER_ALIAS = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_ALIAS", "browse
 DEFAULT_DEBUG_USER_FIRST_NAME = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_FIRST_NAME", "Browser")
 DEFAULT_DEBUG_USER_LAST_NAME = os.getenv("MINIAPP_DEFAULT_DEBUG_USER_LAST_NAME", "Debug")
 DB_PATH = Path(os.getenv("MINIAPP_DB_PATH", str(DATA_DIR / "trainer.db")))
+# Athlete profile for the coach prompt: personal/medical context, lives next to
+# the DB on the server only (never in the public repo).
+COACH_PROFILE_PATH = Path(os.getenv("COACH_PROFILE_PATH", str(DB_PATH.parent / "coach_profile.json")))
 SESSION_COOKIE_NAME = "trainer_session"
 SESSION_SECRET = os.getenv("MINIAPP_SESSION_SECRET") or "trainer-dev-session-secret"
 SESSION_MAX_AGE_SECONDS = int(os.getenv("MINIAPP_SESSION_MAX_AGE", "2592000"))
@@ -73,7 +76,10 @@ def _generate_and_store_recommendation(user_id: int) -> dict[str, Any] | None:
     body_weights = STORE.list_body_weights(user_id)
     try:
         recommendation, usage, model = recommender.generate(
-            workouts, body_weights, EXERCISE_CATALOG
+            workouts,
+            body_weights,
+            EXERCISE_CATALOG,
+            profile=recommender.load_profile(COACH_PROFILE_PATH),
         )
     except recommender.RecommendationError as exc:
         STORE.fail_recommendation(user_id, str(exc))
