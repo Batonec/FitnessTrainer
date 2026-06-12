@@ -1054,7 +1054,7 @@ private struct TodayScreen: View {
                     setIndex: nextState.setIndex
                 )
             }
-            .presentationDetents([.height(560)])
+            .presentationDetents([.height(520)])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showRationale) {
@@ -1738,27 +1738,29 @@ struct QuickAddSheet: View {
                             }
                         }
                         .padding(.top, 4)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
 
-                        Button {
-                            onApply(state)
-                            dismiss()
-                        } label: {
-                            Text("Сохранить сет")
-                                .font(.jbm(17, weight: .heavy))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(DesignPalette.ink, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                                .shadow(color: DesignPalette.ink.opacity(0.35), radius: 18, y: 8)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 20)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
+                Spacer(minLength: 12)
 
-                Spacer(minLength: 0)
+                Button {
+                    onApply(state)
+                    dismiss()
+                } label: {
+                    Text("Сохранить сет")
+                        .font(.jbm(17, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(DesignPalette.ink, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .shadow(color: DesignPalette.ink.opacity(0.35), radius: 18, y: 8)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 28)
             }
+            .padding(.top, 8)
         }
     }
 
