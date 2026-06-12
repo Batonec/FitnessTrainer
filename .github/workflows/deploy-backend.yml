@@ -74,6 +74,7 @@ jobs:
             backend/server.py \
             backend/backend_store.py \
             backend/recommender.py \
+            backend/refresh_recommendation.py \
             "$VPS_USER@$VPS_HOST:$DEPLOY_BASE/app/"
           scp -P "${VPS_PORT:-22}" \
             backend/deploy/trainer-miniapp-backend.service \
@@ -87,7 +88,7 @@ jobs:
         run: |
           set -eu
           ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "\
-            chmod 644 '$DEPLOY_BASE/app/server.py' '$DEPLOY_BASE/app/backend_store.py' '$DEPLOY_BASE/app/recommender.py' '/etc/systemd/system/$BACKEND_SERVICE' && \
+            chmod 644 '$DEPLOY_BASE/app/server.py' '$DEPLOY_BASE/app/backend_store.py' '$DEPLOY_BASE/app/recommender.py' '$DEPLOY_BASE/app/refresh_recommendation.py' '/etc/systemd/system/$BACKEND_SERVICE' && \
             test -f /etc/trainer-miniapp/backend.env && \
             systemctl daemon-reload && \
             systemctl enable --now '$BACKEND_SERVICE' && \
