@@ -1,6 +1,8 @@
-# Trainer
+# Pocket Coach
 
-`Trainer` — приложение для ведения истории тренировок, отслеживания прогресса по упражнениям и контроля веса тела.
+> Pocket AI coach for strength training — SwiftUI iOS app + self-hosted backend, next-workout plans powered by Claude.
+
+`Pocket Coach` (приложение `Trainer`) — карманный ИИ-тренер: история силовых тренировок, прогресс по упражнениям, контроль веса тела и план следующей тренировки от ИИ.
 
 В текущем состоянии репозиторий содержит:
 
