@@ -1641,20 +1641,23 @@ private struct TodayExerciseCard: View {
         ZStack {
             Circle()
                 .fill(DesignPalette.accent)
+                .frame(width: 42, height: 42)
+                .shadow(color: DesignPalette.accent.opacity(0.33), radius: 10, y: 5)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
+                        .blendMode(.plusLighter)
+                )
             Image(systemName: "plus")
                 .font(.jbm(18, weight: .bold))
                 .foregroundStyle(.white)
         }
-        .frame(width: 42, height: 42)
-        .shadow(color: DesignPalette.accent.opacity(0.33), radius: 10, y: 5)
-        .overlay(
-            Circle()
-                .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
-                .blendMode(.plusLighter)
-        )
         .scaleEffect(plusPressed ? 0.84 : 1)
         .animation(.spring(response: 0.22, dampingFraction: 0.55), value: plusPressed)
-        .contentShape(Circle())
+        // Visual circle stays 42pt, but the tap target is a generous 56pt square
+        // so you don't have to aim precisely.
+        .frame(width: 56, height: 56)
+        .contentShape(Rectangle())
         .accessibilityLabel("Добавить подход")
         .accessibilityHint("Долгое нажатие — свой вес и повторы")
         .onTapGesture {
@@ -1664,7 +1667,7 @@ private struct TodayExerciseCard: View {
         // `pressing:` drives the scale on touch-down for BOTH a quick tap and a
         // hold; on release we keep the pressed look ~140ms so even a fast tap is
         // visibly animated. `perform:` opens the manual editor on a short hold.
-        .onLongPressGesture(minimumDuration: 0.18, maximumDistance: 14, pressing: { isPressing in
+        .onLongPressGesture(minimumDuration: 0.12, maximumDistance: 16, pressing: { isPressing in
             if isPressing {
                 plusPressed = true
             } else {
