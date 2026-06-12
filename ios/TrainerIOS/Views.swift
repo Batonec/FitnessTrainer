@@ -927,17 +927,38 @@ private struct CoachRationaleSheet: View {
                         .background(chip.color.opacity(0.13), in: Capsule())
                         .overlay(Capsule().stroke(chip.color.opacity(0.24), lineWidth: 0.5))
                     }
-                    Text(rationale)
-                        .font(.jbm(13))
-                        .foregroundStyle(DesignPalette.ink2)
-                        .lineSpacing(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
+                            Text(markdown(para))
+                                .font(.jbm(13))
+                                .foregroundStyle(DesignPalette.ink2)
+                                .lineSpacing(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    // Split the rationale into readable paragraphs (the model emits one logical
+    // point per line); blank lines are dropped.
+    private var paragraphs: [String] {
+        rationale
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    // Render **bold** inline; fall back to plain text if markdown can't parse.
+    private func markdown(_ line: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: line,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(line)
     }
 }
 
@@ -949,6 +970,7 @@ private struct TodayScreen: View {
     @State private var isConfirmingReset = false
     @State private var showRareCatalog = false
     @State private var showRationale = false
+    @State private var confirmRegen = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1044,6 +1066,18 @@ private struct TodayScreen: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog(
+            "Перегенерировать совет?",
+            isPresented: $confirmRegen,
+            titleVisibility: .visible
+        ) {
+            Button("Обновить совет") {
+                Task { await store.refreshRecommendation() }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("ИИ построит новый план тренировки. Это занимает 15–20 секунд.")
         }
         .confirmationDialog(
             pendingActionExercise?.exerciseName ?? "Упражнение",
@@ -1258,17 +1292,36 @@ private struct TodayScreen: View {
                 .tracking(0.4)
                 .foregroundStyle(DesignPalette.ink3)
             Spacer()
-            if let rationale = store.recommendation?.recommendation?.rationale,
-               !rationale.isEmpty {
+            HStack(spacing: 14) {
                 Button {
-                    showRationale = true
+                    confirmRegen = true
                 } label: {
-                    Image(systemName: "questionmark.circle")
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(DesignPalette.ink3)
+                    Group {
+                        if store.isRefreshingRecommendation {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 16, weight: .regular))
+                        }
+                    }
+                    .foregroundStyle(DesignPalette.ink3)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Почему такой план")
+                .disabled(store.isRefreshingRecommendation)
+                .accessibilityLabel("Перегенерировать совет")
+
+                if let rationale = store.recommendation?.recommendation?.rationale,
+                   !rationale.isEmpty {
+                    Button {
+                        showRationale = true
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(DesignPalette.ink3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Почему такой план")
+                }
             }
         }
         .padding(.horizontal, 4)
@@ -1418,9 +1471,9 @@ private struct TodayExerciseCard: View {
                     setsLine
                 }
 
-                // Coach's reasoning for this target — only while it's still a
-                // plan preview (no logged sets yet), to keep logged cards clean.
-                if card.sets.isEmpty, let coachNote {
+                // Coach's reasoning for this target — kept visible even after
+                // logging sets, so the "почему такой вес" context never vanishes.
+                if let coachNote {
                     Text(coachNote)
                         .font(.jbm(10.5, weight: .medium))
                         .foregroundStyle(DesignPalette.ink3)
