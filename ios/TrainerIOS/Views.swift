@@ -1054,8 +1054,7 @@ private struct TodayScreen: View {
                     setIndex: nextState.setIndex
                 )
             }
-            .presentationDetents([.height(560)])
-            .presentationDragIndicator(.visible)
+            .presentationDetents([.height(580)])
             .presentationBackground(.clear)
         }
         .sheet(isPresented: $showRationale) {
@@ -1682,11 +1681,17 @@ struct QuickAddSheet: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.18).ignoresSafeArea()
+            Color.black.opacity(0.38).ignoresSafeArea()
 
             VStack {
                 Spacer()
                 VStack(spacing: 0) {
+                    Capsule()
+                        .fill(DesignPalette.ink.opacity(0.16))
+                        .frame(width: 38, height: 5)
+                        .padding(.top, 10)
+                        .padding(.bottom, 2)
+
                     exerciseHeader
 
                     VStack(spacing: 0) {
@@ -1755,57 +1760,76 @@ struct QuickAddSheet: View {
                                 .shadow(color: DesignPalette.ink.opacity(0.35), radius: 18, y: 8)
                         }
                         .buttonStyle(.plain)
-                        .padding(.top, 18)
+                        .padding(.top, 20)
                     }
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
                 }
-                .liquidGlass(radius: 32)
+                .background(panelBackground)
                 .padding(.horizontal, 12)
-                .padding(.bottom, 20)
+                .padding(.bottom, 16)
             }
         }
         .background(.clear)
     }
 
+    // Solid warm panel — a modal must read crisply, so this is opaque paper with
+    // a glass-like rim and a soft lift, not a see-through glass tile.
+    private var panelBackground: some View {
+        RoundedRectangle(cornerRadius: 32, style: .continuous)
+            .fill(DesignPalette.paper)
+            .overlay(
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .fill(Color.white.opacity(0.45))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .stroke(Color.white.opacity(0.7), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 32, y: 14)
+    }
+
     private var exerciseHeader: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(state.exerciseName)
-                    .font(.jbm(15, weight: .heavy))
-                    .tracking(-0.3)
-                    .foregroundStyle(DesignPalette.ink)
-                    .lineLimit(1)
-                if !state.previousLabel.isEmpty && state.previousLabel != "—" {
-                    HStack(spacing: 4) {
-                        Text(state.previousLabel)
-                            .mono(12)
-                            .foregroundStyle(DesignPalette.ink3)
-                        Text("→ \(state.targetLabel)")
-                            .mono(12, weight: .heavy)
-                            .foregroundStyle(DesignPalette.accent)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(state.exerciseName)
+                        .font(.jbm(16, weight: .heavy))
+                        .tracking(-0.3)
+                        .foregroundStyle(DesignPalette.ink)
+                        .lineLimit(1)
+                    if !state.previousLabel.isEmpty && state.previousLabel != "—" {
+                        HStack(spacing: 4) {
+                            Text(state.previousLabel)
+                                .mono(12)
+                                .foregroundStyle(DesignPalette.ink3)
+                            Text("→ \(state.targetLabel)")
+                                .mono(12, weight: .heavy)
+                                .foregroundStyle(DesignPalette.accent)
+                        }
+                        .lineLimit(1)
                     }
-                    .lineLimit(1)
                 }
+
+                Spacer()
+
+                Text("СЕТ \(state.currentSetIndex)")
+                    .font(.jbm(10.5, weight: .heavy))
+                    .tracking(0.4)
+                    .foregroundStyle(DesignPalette.ink3)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .chipBackground()
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
 
-            Spacer()
-
-            Text("СЕТ \(state.currentSetIndex)")
-                .font(.jbm(10.5, weight: .heavy))
-                .tracking(0.4)
-                .foregroundStyle(DesignPalette.ink3)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .chipBackground()
+            Rectangle()
+                .fill(DesignPalette.sep)
+                .frame(height: 0.5)
+                .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(Color.white.opacity(0.6))
-                .padding(10)
-        )
     }
 }
 
