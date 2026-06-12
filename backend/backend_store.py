@@ -55,6 +55,89 @@ def normalize_set_effort(value: object) -> str | None:
     return text
 
 
+MAX_RECOMMENDATION_SNAPSHOT_BYTES = 8192
+
+
+def _snapshot_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _snapshot_str(value: object, limit: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text[:limit] if text else None
+
+
+def normalize_recommendation_snapshot(value: object) -> dict[str, Any] | None:
+    """Sanitize the optional coach-recommendation snapshot a client attaches to
+    a workout (``data.recommendation``) for actual-vs-recommended stats.
+
+    Best-effort by design: anything malformed yields ``None`` and the workout
+    saves without a snapshot — linkage must never fail a save.
+    """
+    if not isinstance(value, dict):
+        return None
+
+    raw_exercises = value.get("exercises")
+    if not isinstance(raw_exercises, list) or not raw_exercises:
+        return None
+
+    exercises: list[dict[str, Any]] = []
+    for raw_exercise in raw_exercises[:10]:
+        if not isinstance(raw_exercise, dict):
+            continue
+        exercise_id = _snapshot_int(raw_exercise.get("exercise_id"))
+        raw_sets = raw_exercise.get("sets")
+        if exercise_id is None or not isinstance(raw_sets, list):
+            continue
+
+        sets: list[dict[str, Any]] = []
+        for raw_set in raw_sets[:12]:
+            if not isinstance(raw_set, dict):
+                continue
+            try:
+                reps = int(raw_set.get("reps"))
+                weight = float(raw_set.get("weight"))
+            except (TypeError, ValueError):
+                continue
+            if reps < 1:
+                continue
+            sets.append({"reps": min(reps, 1000), "weight": min(max(weight, 0.0), 10000.0)})
+
+        if sets:
+            exercises.append(
+                {
+                    "exercise_id": exercise_id,
+                    "name": _snapshot_str(raw_exercise.get("name"), 120) or "",
+                    "sets": sets,
+                }
+            )
+
+    if not exercises:
+        return None
+
+    load_type = value.get("load_type")
+    snapshot = {
+        "schema": _snapshot_int(value.get("schema")) or 1,
+        "source": _snapshot_str(value.get("source"), 32) or "coach",
+        "model": _snapshot_str(value.get("model"), 64),
+        "generated_at": _snapshot_int(value.get("generated_at")),
+        "applied_at": _snapshot_str(value.get("applied_at"), 40),
+        "based_on_workout_id": _snapshot_int(value.get("based_on_workout_id")),
+        "based_on_workout_count": _snapshot_int(value.get("based_on_workout_count")),
+        "focus": _snapshot_str(value.get("focus"), 200),
+        "load_type": load_type if load_type in ALLOWED_LOAD_TYPES else None,
+        "exercises": exercises,
+    }
+
+    if len(json.dumps(snapshot, ensure_ascii=False)) > MAX_RECOMMENDATION_SNAPSHOT_BYTES:
+        return None
+    return snapshot
+
+
 def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
     raw_exercises = payload.get("data", {}).get("exercises", [])
     if not isinstance(raw_exercises, list) or not raw_exercises:
@@ -132,6 +215,10 @@ def normalize_workout_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], 
             "exercises": normalized_exercises,
         },
     }
+
+    recommendation = normalize_recommendation_snapshot(data.get("recommendation"))
+    if recommendation is not None:
+        normalized_payload["data"]["recommendation"] = recommendation
 
     return normalized_payload, client_id
 
@@ -392,6 +479,26 @@ class MiniAppStore:
             ).fetchone()
 
             if existing is not None:
+                # client_id dedupe (e.g. an offline retry): keep the stored row,
+                # but backfill the recommendation snapshot if the retry carries
+                # one and the stored row doesn't — otherwise a flaky first
+                # attempt silently loses the workout↔recommendation link.
+                incoming_snapshot = normalized_payload["data"].get("recommendation")
+                existing_payload = json.loads(existing["payload_json"])
+                if incoming_snapshot is not None and existing_payload.get("data", {}).get("recommendation") is None:
+                    existing_payload.setdefault("data", {})["recommendation"] = incoming_snapshot
+                    connection.execute(
+                        "UPDATE workouts SET payload_json = ?, updated_at = ? WHERE id = ?",
+                        (json.dumps(existing_payload, ensure_ascii=False), timestamp, existing["id"]),
+                    )
+                    existing = connection.execute(
+                        """
+                        SELECT id, user_id, client_id, workout_date, payload_json, created_at, updated_at
+                        FROM workouts
+                        WHERE id = ?
+                        """,
+                        (existing["id"],),
+                    ).fetchone()
                 return self._deserialize_workout(existing), False
 
             cursor = connection.execute(
@@ -442,6 +549,14 @@ class MiniAppStore:
             existing = self._get_workout_row(connection, user_id, workout_id)
             if existing is None:
                 return None
+
+            # Preserve the stored recommendation snapshot verbatim when the
+            # incoming payload lacks one: clients rebuild the payload from the
+            # draft on edit and would otherwise wipe the linkage.
+            if "recommendation" not in normalized_payload["data"]:
+                existing_snapshot = json.loads(existing["payload_json"]).get("data", {}).get("recommendation")
+                if existing_snapshot is not None:
+                    normalized_payload["data"]["recommendation"] = existing_snapshot
 
             resolved_client_id = existing["client_id"] or normalized_client_id
             connection.execute(
