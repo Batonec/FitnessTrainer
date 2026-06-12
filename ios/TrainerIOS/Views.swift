@@ -1663,8 +1663,8 @@ private struct TodayExerciseCard: View {
         }
         // `pressing:` drives the scale on touch-down for BOTH a quick tap and a
         // hold; on release we keep the pressed look ~140ms so even a fast tap is
-        // visibly animated. `perform:` opens the manual editor on a quicker hold.
-        .onLongPressGesture(minimumDuration: 0.25, maximumDistance: 14, pressing: { isPressing in
+        // visibly animated. `perform:` opens the manual editor on a short hold.
+        .onLongPressGesture(minimumDuration: 0.18, maximumDistance: 14, pressing: { isPressing in
             if isPressing {
                 plusPressed = true
             } else {
