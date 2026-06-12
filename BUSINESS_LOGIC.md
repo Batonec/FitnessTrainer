@@ -110,7 +110,7 @@
 
 Источник:
 
-- [backend/web/data/exercises.json](./backend/web/data/exercises.json)
+- [backend/static/data/exercises.json](./backend/static/data/exercises.json)
 
 Используется для:
 

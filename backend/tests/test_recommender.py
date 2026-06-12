@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 import support  # noqa: F401 — adds backend to sys.path
-from support import WEB_DIR
+from support import STATIC_DIR
 
 import recommender
 
@@ -17,7 +17,7 @@ CATALOG = [
 
 class RecommenderTests(unittest.TestCase):
     def test_load_catalog_reads_web_data(self) -> None:
-        catalog = recommender.load_catalog(WEB_DIR)
+        catalog = recommender.load_catalog(STATIC_DIR)
         self.assertTrue(catalog)
         self.assertTrue(all("id" in item and "name" in item for item in catalog))
 

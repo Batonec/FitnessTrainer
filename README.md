@@ -70,7 +70,7 @@
 
 - история тренировок — backend / SQLite;
 - записи веса тела — backend / SQLite;
-- справочник упражнений — [backend/web/data/exercises.json](./backend/web/data/exercises.json);
+- справочник упражнений — [backend/static/data/exercises.json](./backend/static/data/exercises.json);
 - черновик тренировки и некоторые UI-состояния — `localStorage`.
 
 `localStorage` не считается источником истины для уже сохранённых тренировок и веса тела.

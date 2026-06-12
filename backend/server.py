@@ -20,7 +20,7 @@ from backend_store import MiniAppStore
 
 
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = Path(os.getenv("MINIAPP_STATIC_DIR", str(BASE_DIR / "web"))).resolve()
+STATIC_DIR = Path(os.getenv("MINIAPP_STATIC_DIR", str(BASE_DIR / "static"))).resolve()
 DATA_DIR = BASE_DIR / "data"
 HOST = os.getenv("MINIAPP_HOST", "127.0.0.1")
 PORT = int(os.getenv("MINIAPP_PORT", "8080"))

@@ -18,7 +18,7 @@ Environment:
                              /opt/trainer-miniapp/app)
     MINIAPP_DB_PATH          SQLite path (default: <backend_dir>/data/trainer.db)
     COACH_MCP_STATIC_DIR     dir holding data/exercises.json (default:
-                             MINIAPP_STATIC_DIR, else <backend_dir>/web)
+                             MINIAPP_STATIC_DIR, else <backend_dir>/static)
     COACH_MCP_USER_ID        user id to operate on (default:
                              MINIAPP_TELEGRAM_RECOVERY_USER_ID, else 3)
     ANTHROPIC_MODEL          override model (default from recommender)
@@ -65,7 +65,7 @@ _DB_PATH = Path(
 _STATIC_DIR = Path(
     os.getenv("COACH_MCP_STATIC_DIR")
     or os.getenv("MINIAPP_STATIC_DIR")
-    or str(Path(_BACKEND_DIR) / "web")
+    or str(Path(_BACKEND_DIR) / "static")
 )
 _DEFAULT_USER_ID = int(
     os.getenv("COACH_MCP_USER_ID")
