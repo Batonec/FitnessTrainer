@@ -1977,15 +1977,6 @@ private struct HistoryScreen: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 12, leading: 18, bottom: 4, trailing: 18))
 
-                        // Compact AI recommendation — the next workout, above the
-                        // stats strip. Hidden when there's nothing to show.
-                        if showsCoachStrip {
-                            HistoryNextWorkoutCard()
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 8, leading: 14, bottom: 2, trailing: 14))
-                        }
-
                         // Use a Button + navigationDestination instead of a
                         // NavigationLink in the List — a List's NavigationLink
                         // forces a system gray disclosure chevron that
@@ -1999,7 +1990,16 @@ private struct HistoryScreen: View {
                         .buttonStyle(.plain)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 14, bottom: 6, trailing: 14))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 14, bottom: 2, trailing: 14))
+
+                        // Compact AI recommendation — the next workout, below the
+                        // stats strip. Hidden when there's nothing to show.
+                        if showsCoachStrip {
+                            HistoryNextWorkoutCard()
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 14, bottom: 6, trailing: 14))
+                        }
                     }
 
                     Section {
@@ -2188,8 +2188,8 @@ private func historyLoadChip(_ type: String) -> (label: String, color: Color) {
 }
 
 // Compact "следующая тренировка" card — the AI recommendation rendered as a
-// FUTURE workout in the same date-rail family as HistoryCard, pinned to the top
-// of История above the stats strip. Tap drills into the full CoachCard on the
+// FUTURE workout in the same date-rail family as HistoryCard, sitting near the
+// top of История just below the stats strip. Tap drills into the full CoachCard on the
 // «Тренировка» tab. Mirrors the Claude Design `CoachCompact` (ready/pending/none);
 // `failed` is owned by the full card, so История stays calm and shows nothing.
 private struct HistoryNextWorkoutCard: View {
