@@ -132,7 +132,7 @@ final class TrainerStoreTests: XCTestCase {
         XCTAssertNil(store.draft.exercises.first?.sets.last?.effort)
     }
 
-    func testRemoveFromPlanAndResetPlan() {
+    func testRemoveFromPlanDropsExerciseAndClearsWhenEmpty() {
         let store = TrainerStore(defaults: .isolatedTestDefaults())
         store.exercises = TestFixtures.catalog
         store.recommendation = readyRecommendation()
@@ -143,11 +143,6 @@ final class TrainerStoreTests: XCTestCase {
 
         // Dropping the last exercise drops the plan entirely.
         store.removeFromPlan(exerciseID: 9)
-        XCTAssertNil(store.appliedPlan)
-
-        store.applyRecommendationAsPlan()
-        XCTAssertNotNil(store.appliedPlan)
-        store.resetAppliedPlan()
         XCTAssertNil(store.appliedPlan)
     }
 

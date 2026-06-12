@@ -403,14 +403,6 @@ final class TrainerStore: ObservableObject {
         }
     }
 
-    /// Drop the applied coach plan and return to the history-based heuristic plan.
-    /// Logged draft sets are untouched.
-    func resetAppliedPlan() {
-        guard appliedPlan != nil else { return }
-        appliedPlan = nil
-        showToast("План сброшен")
-    }
-
     /// Remove a single (not yet started) exercise from the applied plan.
     /// Dropping the last exercise drops the whole plan.
     func removeFromPlan(exerciseID: Int) {

@@ -1145,7 +1145,7 @@ private struct TodayScreen: View {
                 } else if store.draft.hasRealSets {
                     sectionHeader("Упражнения", right: sessionSummary)
                 } else if store.appliedPlan != nil {
-                    sectionHeader("План от тренера", right: resetPlanButton)
+                    sectionHeader("План от тренера", right: nil)
                 } else {
                     sectionHeader("План тренировки", right: nil)
                 }
@@ -1390,22 +1390,6 @@ private struct TodayScreen: View {
             Text(label)
                 .font(.jbm(12, weight: .semibold))
                 .foregroundStyle(DesignPalette.ink3)
-        )
-    }
-
-    private var resetPlanButton: AnyView {
-        AnyView(
-            Button {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                    store.resetAppliedPlan()
-                }
-            } label: {
-                Text("Сбросить")
-                    .font(.jbm(12, weight: .semibold))
-                    .foregroundStyle(DesignPalette.ink3)
-                    .underline()
-            }
-            .buttonStyle(.plain)
         )
     }
 
