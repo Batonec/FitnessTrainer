@@ -403,6 +403,14 @@ final class TrainerStore: ObservableObject {
         }
     }
 
+    /// The coach's one-line note for an exercise in the applied plan (why this
+    /// weight/reps) — shown on each plan card now that the expanded card is gone.
+    func coachNote(for exerciseID: Int) -> String? {
+        guard let note = appliedPlan?.exercises.first(where: { $0.exerciseID == exerciseID })?.note,
+              !note.isEmpty else { return nil }
+        return note
+    }
+
     /// Remove a single (not yet started) exercise from the applied plan.
     /// Dropping the last exercise drops the whole plan.
     func removeFromPlan(exerciseID: Int) {

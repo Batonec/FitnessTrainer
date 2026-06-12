@@ -742,9 +742,12 @@ private struct MainShellView: View {
 
 // MARK: - Coach recommendation card ("Совет тренера")
 
+// CoachCard now renders ONLY the transient states (pending / failed / none).
+// The ready recommendation is no longer a separate card — its content lives in
+// the "План от тренера" section: per-exercise notes on each plan card, and the
+// rationale behind a "?" in the section header. So the ready branch is empty.
 struct CoachCard: View {
     @EnvironmentObject private var store: TrainerStore
-    @State private var expanded = false
 
     var body: some View {
         if let rec = store.recommendation {
@@ -756,204 +759,16 @@ struct CoachCard: View {
     private func card(for rec: RecommendationResponse) -> some View {
         let status = rec.status ?? "none"
         let busy = store.isRefreshingRecommendation
-        if let payload = rec.recommendation, status != "failed" {
-            readyCard(rec, payload: payload, dimmed: busy || status == "pending")
-        } else if busy || status == "pending" {
+        if busy || status == "pending" {
             pendingCard
         } else if status == "failed" {
             failedCard(rec)
+        } else if rec.recommendation != nil {
+            EmptyView()  // ready → shown inline in the plan section
         } else {
             noneCard
         }
     }
-
-    // MARK: ready
-
-    private func readyCard(_ rec: RecommendationResponse, payload: RecommendationPayload, dimmed: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if rec.stale == true && !dimmed {
-                staleRibbon
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                header(basedOn: rec.basedOnWorkoutCount)
-
-                Text(payload.focus)
-                    .font(.jbm(18, weight: .bold))
-                    .tracking(-0.4)
-                    .foregroundStyle(DesignPalette.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 11)
-
-                loadChipView(payload.loadType)
-                    .padding(.top, 11)
-
-                VStack(spacing: 0) {
-                    ForEach(payload.exercises) { exerciseRow($0) }
-                }
-                .padding(.top, 14)
-
-                rationaleToggle(payload.rationale)
-                    .padding(.top, 4)
-
-                actions
-                    .padding(.top, 16)
-            }
-            .padding(16)
-            .opacity(dimmed ? 0.4 : 1)
-        }
-        .liquidGlass(radius: 26)
-        .overlay { if dimmed { pendingOverlay } }
-    }
-
-    private var staleRibbon: some View {
-        Button {
-            Task { await store.refreshRecommendation() }
-        } label: {
-            HStack(spacing: 8) {
-                Circle().fill(DesignPalette.warn).frame(width: 6, height: 6)
-                Text("Есть тренировка новее, чем эта рекомендация")
-                    .font(.jbm(11.5, weight: .semibold))
-                    .foregroundStyle(DesignPalette.warn)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) {
-                    Text("Обновить").font(.jbm(11.5, weight: .bold))
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(DesignPalette.warn)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(DesignPalette.warn.opacity(0.12))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func exerciseRow(_ ex: RecommendedExercise) -> some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(DesignPalette.ink.opacity(0.07)).frame(height: 0.5)
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(ex.name)
-                        .font(.jbm(14, weight: .semibold))
-                        .tracking(-0.2)
-                        .foregroundStyle(DesignPalette.ink)
-                    if let note = ex.note, !note.isEmpty {
-                        Text(note)
-                            .font(.jbm(10.5, weight: .medium))
-                            .foregroundStyle(DesignPalette.ink3)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer(minLength: 8)
-                Text(formatSets(ex.sets))
-                    .font(.jbm(12.5, weight: .bold))
-                    .tracking(-0.2)
-                    .foregroundStyle(DesignPalette.ink)
-                    .monospacedDigit()
-                    .fixedSize()
-            }
-            .padding(.vertical, 9)
-        }
-    }
-
-    private func rationaleToggle(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Rectangle().fill(DesignPalette.ink.opacity(0.07)).frame(height: 0.5)
-            Button {
-                withAnimation(.easeInOut(duration: 0.16)) { expanded.toggle() }
-            } label: {
-                HStack {
-                    HStack(spacing: 7) {
-                        Image(systemName: "questionmark.circle").font(.system(size: 13)).foregroundStyle(DesignPalette.ink3)
-                        Text("Почему так")
-                            .font(.jbm(10.5, weight: .semibold))
-                            .tracking(0.6)
-                            .textCase(.uppercase)
-                            .foregroundStyle(DesignPalette.ink2)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DesignPalette.ink3)
-                        .rotationEffect(.degrees(expanded ? 180 : 0))
-                }
-                .padding(.top, 12)
-                .padding(.bottom, 2)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if expanded {
-                Text(text)
-                    .font(.jbm(12))
-                    .foregroundStyle(DesignPalette.ink2)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-            }
-        }
-    }
-
-    private var actions: some View {
-        HStack(spacing: 8) {
-            Button {
-                Task { await store.refreshRecommendation() }
-            } label: {
-                HStack(spacing: 8) {
-                    if store.isRefreshingRecommendation {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 14, weight: .semibold))
-                    }
-                    Text("Обновить").font(.jbm(13.5, weight: .semibold))
-                }
-                .foregroundStyle(store.isRefreshingRecommendation ? DesignPalette.ink4 : DesignPalette.ink2)
-                .frame(height: 46)
-                .padding(.horizontal, 16)
-                .chipBackground()
-            }
-            .buttonStyle(.plain)
-            .disabled(store.isRefreshingRecommendation)
-
-            applySlot
-        }
-    }
-
-    /// No "Применить" button — every generated recommendation auto-applies as the
-    /// plan. This is just a passive confirmation that the shown advice is the plan.
-    @ViewBuilder
-    private var applySlot: some View {
-        if store.isRecommendationApplied {
-            HStack(spacing: 9) {
-                Image(systemName: "checkmark").font(.system(size: 15, weight: .bold))
-                Text("В плане").font(.jbm(14.5, weight: .bold))
-            }
-            .foregroundStyle(DesignPalette.ok)
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .background(DesignPalette.ok.opacity(0.12), in: Capsule())
-            .overlay(Capsule().stroke(DesignPalette.ok.opacity(0.25), lineWidth: 0.5))
-        } else {
-            Spacer()
-        }
-    }
-
-    private var pendingOverlay: some View {
-        HStack(spacing: 11) {
-            ProgressView().tint(DesignPalette.accent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("ИИ обновляет план…").font(.jbm(13.5, weight: .bold)).foregroundStyle(DesignPalette.ink)
-                Text("обычно 15–20 секунд").font(.jbm(10.5)).foregroundStyle(DesignPalette.ink3)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .chipBackground()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     // MARK: pending (no prior payload)
 
     private var pendingCard: some View {
@@ -1071,45 +886,58 @@ struct CoachCard: View {
             }
         }
     }
+}
 
-    private func loadChipView(_ type: String) -> some View {
-        let chip = loadChip(type)
-        return HStack(spacing: 6) {
-            Circle().fill(chip.color).frame(width: 6, height: 6)
-            Text("\(chip.label) нагрузка")
-                .font(.jbm(10, weight: .bold)).tracking(0.6)
-                .textCase(.uppercase).foregroundStyle(chip.color)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(chip.color.opacity(0.13), in: Capsule())
-        .overlay(Capsule().stroke(chip.color.opacity(0.24), lineWidth: 0.5))
-    }
+// The "почему так" sheet behind the "?" in the plan header — focus + load + the
+// full rationale text that used to live (collapsed) inside the expanded card.
+private struct CoachRationaleSheet: View {
+    var focus: String?
+    var loadType: String?
+    var rationale: String
 
-    private func loadChip(_ type: String) -> (label: String, color: Color) {
-        switch type {
-        case "heavy": return ("Тяжёлая", DesignPalette.bad)
-        case "light": return ("Лёгкая", DesignPalette.ok)
-        default: return ("Средняя", DesignPalette.warn)
-        }
-    }
-
-    private func formatWeight(_ w: Double) -> String {
-        w == w.rounded() ? String(Int(w)) : String(format: "%g", w)
-    }
-
-    private func formatSets(_ sets: [RecommendedSet]) -> String {
-        guard !sets.isEmpty else { return "" }
-        let weights = sets.map(\.weight)
-        let reps = sets.map(\.reps)
-        if Set(weights).count == 1 {
-            let w = formatWeight(weights[0])
-            if Set(reps).count == 1 {
-                return "\(w) кг × \(reps[0]) × \(sets.count)"
+    var body: some View {
+        ZStack {
+            WarmWallpaper()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 15))
+                            .foregroundStyle(DesignPalette.accent)
+                        Text("Почему так")
+                            .font(.jbm(11, weight: .bold)).tracking(0.6)
+                            .textCase(.uppercase).foregroundStyle(DesignPalette.ink2)
+                        Spacer()
+                    }
+                    if let focus, !focus.isEmpty {
+                        Text(focus)
+                            .font(.jbm(18, weight: .bold)).tracking(-0.4)
+                            .foregroundStyle(DesignPalette.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let loadType {
+                        let chip = historyLoadChip(loadType)
+                        HStack(spacing: 6) {
+                            Circle().fill(chip.color).frame(width: 6, height: 6)
+                            Text("\(chip.label) нагрузка".uppercased())
+                                .font(.jbm(10, weight: .bold)).tracking(0.6)
+                                .foregroundStyle(chip.color)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(chip.color.opacity(0.13), in: Capsule())
+                        .overlay(Capsule().stroke(chip.color.opacity(0.24), lineWidth: 0.5))
+                    }
+                    Text(rationale)
+                        .font(.jbm(13))
+                        .foregroundStyle(DesignPalette.ink2)
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            return "\(w) кг × " + reps.map(String.init).joined(separator: ", ")
         }
-        return sets.map { "\(formatWeight($0.weight))×\($0.reps)" }.joined(separator: ", ")
     }
 }
 
@@ -1120,6 +948,7 @@ private struct TodayScreen: View {
     @State private var pendingActionExercise: DraftDisplayExercise?
     @State private var isConfirmingReset = false
     @State private var showRareCatalog = false
+    @State private var showRationale = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -1145,7 +974,7 @@ private struct TodayScreen: View {
                 } else if store.draft.hasRealSets {
                     sectionHeader("Упражнения", right: sessionSummary)
                 } else if store.appliedPlan != nil {
-                    sectionHeader("План от тренера", right: nil)
+                    coachPlanHeader
                 } else {
                     sectionHeader("План тренировки", right: nil)
                 }
@@ -1155,6 +984,7 @@ private struct TodayScreen: View {
                         TodayExerciseCard(
                             card: card,
                             planningContext: store.planningContext(for: card.exerciseID),
+                            coachNote: store.coachNote(for: card.exerciseID),
                             onAdd: {
                                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                                     store.addPlannedSet(exerciseID: card.exerciseID)
@@ -1205,6 +1035,15 @@ private struct TodayScreen: View {
             .presentationDetents([.height(560)])
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
+        }
+        .sheet(isPresented: $showRationale) {
+            CoachRationaleSheet(
+                focus: store.recommendation?.recommendation?.focus,
+                loadType: store.recommendation?.recommendation?.loadType,
+                rationale: store.recommendation?.recommendation?.rationale ?? ""
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .confirmationDialog(
             pendingActionExercise?.exerciseName ?? "Упражнение",
@@ -1406,6 +1245,36 @@ private struct TodayScreen: View {
         .padding(.top, 4)
     }
 
+    // Header for the coach plan: spark mark (it's AI) + a "?" that reveals the
+    // rationale ("почему так") in a sheet — the only surviving bit of the old
+    // expanded card besides the per-exercise notes now on each plan card.
+    private var coachPlanHeader: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13))
+                .foregroundStyle(DesignPalette.accent)
+            Text("План от тренера".uppercased())
+                .font(.jbm(13, weight: .bold))
+                .tracking(0.4)
+                .foregroundStyle(DesignPalette.ink3)
+            Spacer()
+            if let rationale = store.recommendation?.recommendation?.rationale,
+               !rationale.isEmpty {
+                Button {
+                    showRationale = true
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(DesignPalette.ink3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Почему такой план")
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+
     private var completedCount: Int {
         store.displayCards().filter { !$0.sets.isEmpty }.count
     }
@@ -1527,6 +1396,7 @@ private func repsRunString(_ reps: [Int]) -> String {
 private struct TodayExerciseCard: View {
     var card: DraftDisplayExercise
     var planningContext: ExercisePlanningContext?
+    var coachNote: String? = nil
     var onAdd: () -> Void
     var onManual: () -> Void
     var onEditLast: () -> Void
@@ -1546,6 +1416,16 @@ private struct TodayExerciseCard: View {
 
                 if !card.sets.isEmpty {
                     setsLine
+                }
+
+                // Coach's reasoning for this target — only while it's still a
+                // plan preview (no logged sets yet), to keep logged cards clean.
+                if card.sets.isEmpty, let coachNote {
+                    Text(coachNote)
+                        .font(.jbm(10.5, weight: .medium))
+                        .foregroundStyle(DesignPalette.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 3)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
