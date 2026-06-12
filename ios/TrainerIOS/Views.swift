@@ -121,19 +121,89 @@ enum DesignPalette {
 
 // One consistent press feedback for action buttons across the app: a quick
 // spring scale-down with a touch of dimming. Use via `.buttonStyle(.pressable)`.
+// A short tap holds the pressed look for a minimum time so it's actually
+// visible (otherwise isPressed flips back before the spring travels).
 struct PressableScaleStyle: ButtonStyle {
     var scale: CGFloat = 0.9
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .opacity(configuration.isPressed ? 0.92 : 1)
-            .animation(.spring(response: 0.26, dampingFraction: 0.55), value: configuration.isPressed)
+        PressBody(configuration: configuration, scale: scale)
+    }
+
+    private struct PressBody: View {
+        let configuration: Configuration
+        let scale: CGFloat
+        @State private var held = false
+        private var down: Bool { configuration.isPressed || held }
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(down ? scale : 1)
+                .opacity(down ? 0.92 : 1)
+                .animation(.spring(response: 0.22, dampingFraction: 0.55), value: down)
+                .onChange(of: configuration.isPressed) { _, pressed in
+                    if pressed {
+                        held = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { held = false }
+                    }
+                }
+        }
     }
 }
 
 extension ButtonStyle where Self == PressableScaleStyle {
     static var pressable: PressableScaleStyle { PressableScaleStyle() }
     static func pressable(scale: CGFloat) -> PressableScaleStyle { PressableScaleStyle(scale: scale) }
+}
+
+// A button that fires once on tap and then auto-repeats while held (with a short
+// initial delay, then accelerating) — for the weight/reps steppers so you can
+// hold instead of tapping many times. Also gives the same press scale feedback.
+struct HoldRepeatButton<Label: View>: View {
+    var scale: CGFloat = 0.86
+    var action: () -> Void
+    @ViewBuilder var label: Label
+
+    @State private var pressed = false
+    @State private var holdTask: Task<Void, Never>?
+
+    init(scale: CGFloat = 0.86, action: @escaping () -> Void, @ViewBuilder label: () -> Label) {
+        self.scale = scale
+        self.action = action
+        self.label = label()
+    }
+
+    var body: some View {
+        label
+            .scaleEffect(pressed ? scale : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.58), value: pressed)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if holdTask == nil { begin() } }
+                    .onEnded { _ in end() }
+            )
+    }
+
+    private func begin() {
+        pressed = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        holdTask = Task { @MainActor in
+            action()  // immediate single step
+            try? await Task.sleep(nanoseconds: 350_000_000)  // hold threshold before repeat
+            var interval: UInt64 = 110_000_000
+            while !Task.isCancelled {
+                action()
+                try? await Task.sleep(nanoseconds: interval)
+                if interval > 50_000_000 { interval -= 10_000_000 }  // accelerate
+            }
+        }
+    }
+
+    private func end() {
+        pressed = false
+        holdTask?.cancel()
+        holdTask = nil
+    }
 }
 
 struct WarmWallpaper: View {
@@ -1582,8 +1652,8 @@ private struct TodayExerciseCard: View {
                 .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
                 .blendMode(.plusLighter)
         )
-        .scaleEffect(plusPressed ? 0.86 : 1)
-        .animation(.spring(response: 0.26, dampingFraction: 0.55), value: plusPressed)
+        .scaleEffect(plusPressed ? 0.84 : 1)
+        .animation(.spring(response: 0.22, dampingFraction: 0.55), value: plusPressed)
         .contentShape(Circle())
         .accessibilityLabel("Добавить подход")
         .accessibilityHint("Долгое нажатие — свой вес и повторы")
@@ -1592,9 +1662,14 @@ private struct TodayExerciseCard: View {
             onAdd()
         }
         // `pressing:` drives the scale on touch-down for BOTH a quick tap and a
-        // hold; `perform:` opens the manual editor on a real long press.
-        .onLongPressGesture(minimumDuration: 0.38, maximumDistance: 12, pressing: { isPressing in
-            plusPressed = isPressing
+        // hold; on release we keep the pressed look ~140ms so even a fast tap is
+        // visibly animated. `perform:` opens the manual editor on a quicker hold.
+        .onLongPressGesture(minimumDuration: 0.25, maximumDistance: 14, pressing: { isPressing in
+            if isPressing {
+                plusPressed = true
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { plusPressed = false }
+            }
         }, perform: {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             onManual()
@@ -1841,7 +1916,7 @@ private struct Stepper: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Button(action: onMinus) {
+            HoldRepeatButton(action: onMinus) {
                 ZStack {
                     Circle().fill(Color.black.opacity(0.06))
                     Image(systemName: "minus")
@@ -1850,7 +1925,6 @@ private struct Stepper: View {
                 }
                 .frame(width: 62, height: 62)
             }
-            .buttonStyle(.pressable)
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
@@ -1862,7 +1936,7 @@ private struct Stepper: View {
             }
             .frame(maxWidth: .infinity)
 
-            Button(action: onPlus) {
+            HoldRepeatButton(action: onPlus) {
                 ZStack {
                     Circle().fill(DesignPalette.accent)
                     Image(systemName: "plus")
@@ -1872,7 +1946,6 @@ private struct Stepper: View {
                 .frame(width: 62, height: 62)
                 .shadow(color: DesignPalette.accent.opacity(0.35), radius: 16, y: 6)
             }
-            .buttonStyle(.pressable(scale: 0.86))
         }
         .padding(.vertical, 6)
     }
