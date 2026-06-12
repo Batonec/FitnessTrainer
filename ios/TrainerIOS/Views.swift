@@ -119,6 +119,23 @@ enum DesignPalette {
     static let accentDeep = Color(red: 0.784, green: 0.212, blue: 0.039) // #C8360A
 }
 
+// One consistent press feedback for action buttons across the app: a quick
+// spring scale-down with a touch of dimming. Use via `.buttonStyle(.pressable)`.
+struct PressableScaleStyle: ButtonStyle {
+    var scale: CGFloat = 0.9
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.26, dampingFraction: 0.55), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == PressableScaleStyle {
+    static var pressable: PressableScaleStyle { PressableScaleStyle() }
+    static func pressable(scale: CGFloat) -> PressableScaleStyle { PressableScaleStyle(scale: scale) }
+}
+
 struct WarmWallpaper: View {
     var dim: Bool = false
 
@@ -818,7 +835,7 @@ struct CoachCard: View {
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background(DesignPalette.accent, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable(scale: 0.96))
                 .padding(.top, 16)
             }
             .frame(maxWidth: .infinity)
@@ -1142,7 +1159,7 @@ private struct TodayScreen: View {
                                 .stroke(DesignPalette.bad.opacity(0.20), lineWidth: 0.5)
                         )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .accessibilityLabel("Отменить тренировку")
 
                 Button {
@@ -1166,7 +1183,7 @@ private struct TodayScreen: View {
                             .blendMode(.plusLighter)
                     )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable(scale: 0.97))
                 .disabled(store.isSavingWorkout)
             }
         } else if let first = store.displayCards().first {
@@ -1193,7 +1210,7 @@ private struct TodayScreen: View {
                         .blendMode(.plusLighter)
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable(scale: 0.97))
         }
     }
 
@@ -1453,6 +1470,7 @@ private struct TodayExerciseCard: View {
     var onManual: () -> Void
     var onEditLast: () -> Void
     var onLongPress: () -> Void
+    @State private var plusPressed = false
 
 
     var body: some View {
@@ -1564,6 +1582,8 @@ private struct TodayExerciseCard: View {
                 .stroke(Color.white.opacity(0.35), lineWidth: 0.5)
                 .blendMode(.plusLighter)
         )
+        .scaleEffect(plusPressed ? 0.86 : 1)
+        .animation(.spring(response: 0.26, dampingFraction: 0.55), value: plusPressed)
         .contentShape(Circle())
         .accessibilityLabel("Добавить подход")
         .accessibilityHint("Долгое нажатие — свой вес и повторы")
@@ -1571,10 +1591,14 @@ private struct TodayExerciseCard: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onAdd()
         }
-        .onLongPressGesture(minimumDuration: 0.38, maximumDistance: 12) {
+        // `pressing:` drives the scale on touch-down for BOTH a quick tap and a
+        // hold; `perform:` opens the manual editor on a real long press.
+        .onLongPressGesture(minimumDuration: 0.38, maximumDistance: 12, pressing: { isPressing in
+            plusPressed = isPressing
+        }, perform: {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             onManual()
-        }
+        })
     }
 }
 
@@ -1609,7 +1633,7 @@ private struct AddExerciseButton: View {
                     .fill(Color.black.opacity(0.03))
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable(scale: 0.97))
         .padding(.top, 6)
     }
 }
@@ -1756,7 +1780,7 @@ struct QuickAddSheet: View {
                         .background(DesignPalette.ink, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
                         .shadow(color: DesignPalette.ink.opacity(0.35), radius: 18, y: 8)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable(scale: 0.96))
                 .padding(.horizontal, 24)
                 .padding(.bottom, 28)
             }
@@ -1826,7 +1850,7 @@ private struct Stepper: View {
                 }
                 .frame(width: 62, height: 62)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
@@ -1848,7 +1872,7 @@ private struct Stepper: View {
                 .frame(width: 62, height: 62)
                 .shadow(color: DesignPalette.accent.opacity(0.35), radius: 16, y: 6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable(scale: 0.86))
         }
         .padding(.vertical, 6)
     }
@@ -3537,7 +3561,7 @@ private struct WeightAddInline: View {
             .frame(width: 44, height: 44)
             .shadow(color: DesignPalette.accent.opacity(0.35), radius: 14, y: 6)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable(scale: 0.86))
         .sheet(isPresented: $showSheet) {
             BodyWeightComposerSheet()
                 .environmentObject(store)
@@ -3698,7 +3722,7 @@ private struct SignInScreen: View {
                     .background(DesignPalette.accent, in: Capsule())
                     .shadow(color: DesignPalette.accent.opacity(0.4), radius: 16, y: 6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable(scale: 0.96))
 
             Button { showSettings = true } label: {
                 HStack(spacing: 6) {
@@ -3755,7 +3779,7 @@ private struct ErrorScreen: View {
                     .frame(height: 50)
                     .background(DesignPalette.accent, in: Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable(scale: 0.96))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
