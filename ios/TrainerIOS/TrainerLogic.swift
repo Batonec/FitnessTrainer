@@ -714,6 +714,30 @@ enum TrainerLogic {
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
+    /// Compact reps label for a recommendation's sets, used by the História
+    /// "next workout" card: uniform reps collapse to "12 × 3", otherwise the
+    /// per-set reps are listed ("12, 12, 10").
+    static func recommendationRepsLabel(_ sets: [RecommendedSet]) -> String {
+        let reps = sets.map(\.reps)
+        guard !reps.isEmpty else { return "" }
+        if Set(reps).count == 1 { return "\(reps[0]) × \(sets.count)" }
+        return reps.map(String.init).joined(separator: ", ")
+    }
+
+    /// The most recently logged working weight (heaviest set) for an exercise
+    /// across all history — the "было" half of the было→план delta. Nil if the
+    /// exercise has never been logged.
+    static func latestWorkingWeight(in workouts: [Workout], exerciseID: Int) -> Double? {
+        let matching = workouts.filter { workout in
+            workout.data.exercises.contains { $0.exerciseID == exerciseID && !$0.sets.isEmpty }
+        }
+        guard let latest = matching.max(by: {
+            DateTools.date(from: $0.workoutDate) < DateTools.date(from: $1.workoutDate)
+        }) else { return nil }
+        let sets = latest.data.exercises.first { $0.exerciseID == exerciseID }?.sets ?? []
+        return sets.map(\.weight).max()
+    }
+
     static func formatBodyWeight(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "ru_RU")

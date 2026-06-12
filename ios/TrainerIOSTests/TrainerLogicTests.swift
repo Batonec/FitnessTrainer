@@ -503,4 +503,60 @@ final class TrainerLogicTests: XCTestCase {
 
         return repeated + [butterfly]
     }
+
+    // MARK: - История "next workout" card helpers
+
+    func testRecommendationRepsLabelCollapsesUniformReps() {
+        let sets = [RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 12, weight: 90), RecommendedSet(reps: 12, weight: 90)]
+        XCTAssertEqual(TrainerLogic.recommendationRepsLabel(sets), "12 × 3")
+    }
+
+    func testRecommendationRepsLabelListsVaryingReps() {
+        let sets = [RecommendedSet(reps: 12, weight: 60), RecommendedSet(reps: 12, weight: 60), RecommendedSet(reps: 10, weight: 60)]
+        XCTAssertEqual(TrainerLogic.recommendationRepsLabel(sets), "12, 12, 10")
+    }
+
+    func testRecommendationRepsLabelEmpty() {
+        XCTAssertEqual(TrainerLogic.recommendationRepsLabel([]), "")
+    }
+
+    func testLatestWorkingWeightPicksMostRecentWorkoutAndHeaviestSet() {
+        let workouts = [
+            TestFixtures.workout(
+                id: 1, clientID: "a", date: "2026-05-01",
+                exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [TestFixtures.set(weight: 100)])]
+            ),
+            TestFixtures.workout(
+                id: 2, clientID: "b", date: "2026-05-20",
+                exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [
+                    TestFixtures.set(weight: 110), TestFixtures.set(weight: 120)
+                ])]
+            ),
+        ]
+        XCTAssertEqual(TrainerLogic.latestWorkingWeight(in: workouts, exerciseID: 8), 120)
+    }
+
+    func testLatestWorkingWeightNilWhenNeverLogged() {
+        let workouts = [
+            TestFixtures.workout(
+                id: 1, clientID: "a", date: "2026-05-01",
+                exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [TestFixtures.set(weight: 100)])]
+            )
+        ]
+        XCTAssertNil(TrainerLogic.latestWorkingWeight(in: workouts, exerciseID: 99))
+    }
+
+    func testLatestWorkingWeightSkipsWorkoutsWithEmptySets() {
+        let workouts = [
+            TestFixtures.workout(
+                id: 2, clientID: "b", date: "2026-05-20",
+                exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [])]
+            ),
+            TestFixtures.workout(
+                id: 1, clientID: "a", date: "2026-05-01",
+                exercises: [TestFixtures.exercise(id: 8, name: "Жим ногами", sets: [TestFixtures.set(weight: 95)])]
+            ),
+        ]
+        XCTAssertEqual(TrainerLogic.latestWorkingWeight(in: workouts, exerciseID: 8), 95)
+    }
 }

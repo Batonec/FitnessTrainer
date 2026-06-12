@@ -1977,6 +1977,15 @@ private struct HistoryScreen: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 12, leading: 18, bottom: 4, trailing: 18))
 
+                        // Compact AI recommendation — the next workout, above the
+                        // stats strip. Hidden when there's nothing to show.
+                        if showsCoachStrip {
+                            HistoryNextWorkoutCard()
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 14, bottom: 2, trailing: 14))
+                        }
+
                         // Use a Button + navigationDestination instead of a
                         // NavigationLink in the List — a List's NavigationLink
                         // forces a system gray disclosure chevron that
@@ -2128,6 +2137,18 @@ private struct HistoryScreen: View {
         .liquidGlass(radius: 20)
     }
 
+    // Mirror HistoryNextWorkoutCard's own state machine so we don't reserve an
+    // empty List row (with insets) when the card renders nothing.
+    private var showsCoachStrip: Bool {
+        guard let rec = store.recommendation else { return false }
+        if store.isRefreshingRecommendation { return true }
+        switch rec.status ?? "none" {
+        case "failed": return false
+        case "ready": return rec.recommendation != nil
+        default: return true
+        }
+    }
+
     private var deleteWorkoutBinding: Binding<Bool> {
         Binding(
             get: { pendingDeleteWorkout != nil },
@@ -2156,6 +2177,248 @@ private struct HistoryScreen: View {
             return workoutDates.contains(d)
         }
     }
+}
+
+private func historyLoadChip(_ type: String) -> (label: String, color: Color) {
+    switch type {
+    case "heavy": return ("Тяжёлая", DesignPalette.bad)
+    case "light": return ("Лёгкая", DesignPalette.ok)
+    default: return ("Средняя", DesignPalette.warn)
+    }
+}
+
+// Compact "следующая тренировка" card — the AI recommendation rendered as a
+// FUTURE workout in the same date-rail family as HistoryCard, pinned to the top
+// of История above the stats strip. Tap drills into the full CoachCard on the
+// «Тренировка» tab. Mirrors the Claude Design `CoachCompact` (ready/pending/none);
+// `failed` is owned by the full card, so История stays calm and shows nothing.
+private struct HistoryNextWorkoutCard: View {
+    @EnvironmentObject private var store: TrainerStore
+
+    var body: some View {
+        if let rec = store.recommendation {
+            content(for: rec)
+        }
+    }
+
+    @ViewBuilder
+    private func content(for rec: RecommendationResponse) -> some View {
+        let status = rec.status ?? "none"
+        if store.isRefreshingRecommendation || status == "pending" {
+            pendingRow
+        } else if let payload = rec.recommendation, status != "failed" {
+            readyCard(payload)
+        } else if status == "failed" {
+            EmptyView()
+        } else {
+            noneRow
+        }
+    }
+
+    // MARK: ready
+
+    private func readyCard(_ payload: RecommendationPayload) -> some View {
+        Button {
+            store.currentTab = .trainings
+        } label: {
+            HStack(spacing: 0) {
+                dateRail
+                rightSide(payload)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(red: 0.984, green: 0.980, blue: 0.969)) // #FBFAF7
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: .black.opacity(0.02), radius: 1, y: 1)
+            .shadow(color: .black.opacity(0.06), radius: 10, y: 6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Accent-tinted rail showing the planned (next) session date — mirrors the
+    // history date rail, but warm instead of grey to read as "upcoming".
+    private var dateRail: some View {
+        VStack {
+            VStack(spacing: 2) {
+                Text(todayDay)
+                    .font(.jbm(28, weight: .heavy))
+                    .tracking(-0.04 * 28)
+                    .foregroundStyle(DesignPalette.ink)
+                Text(todayMonth)
+                    .tLabel()
+            }
+            Rectangle()
+                .fill(DesignPalette.accent.opacity(0.30))
+                .frame(width: 22, height: 0.5)
+                .padding(.vertical, 4)
+            VStack(spacing: 2) {
+                Text(todayWeekday)
+                    .tLabel()
+                    .foregroundStyle(DesignPalette.accent)
+                Text("ПЛАН")
+                    .tLabel(size: 9.5)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 14)
+        .frame(width: 64)
+        .frame(maxHeight: .infinity)
+        .background(DesignPalette.accent.opacity(0.05))
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(DesignPalette.accent.opacity(0.13))
+                .frame(width: 0.5)
+        }
+    }
+
+    private func rightSide(_ payload: RecommendationPayload) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DesignPalette.accent)
+                Text("След. тренировка")
+                    .tLabel()
+                Spacer(minLength: 6)
+                loadBadge(payload.loadType)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(payload.exercises.enumerated()), id: \.element.exerciseID) { idx, ex in
+                    if idx > 0 {
+                        Rectangle().fill(Color.black.opacity(0.07)).frame(height: 0.5)
+                    }
+                    exerciseRow(ex)
+                }
+            }
+            .padding(.top, 9)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func loadBadge(_ type: String) -> some View {
+        let chip = historyLoadChip(type)
+        return HStack(spacing: 4) {
+            Circle().fill(chip.color).frame(width: 5, height: 5)
+            Text(chip.label.uppercased())
+                .font(.jbm(9, weight: .bold))
+                .tracking(0.4)
+                .foregroundStyle(chip.color)
+        }
+        .fixedSize()
+    }
+
+    private func exerciseRow(_ ex: RecommendedExercise) -> some View {
+        let plan = ex.sets.map(\.weight).max() ?? 0
+        let prev = TrainerLogic.latestWorkingWeight(in: store.workouts, exerciseID: ex.exerciseID)
+        let up = (prev ?? plan) < plan
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(ExerciseGlyph.short(name: ex.name))
+                .font(.jbm(12.5, weight: .semibold))
+                .tracking(-0.15)
+                .foregroundStyle(DesignPalette.ink)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            deltaText(prev: prev, plan: plan, reps: TrainerLogic.recommendationRepsLabel(ex.sets), up: up)
+                .font(.jbm(11.5, weight: .semibold))
+                .monospacedDigit()
+                .fixedSize()
+        }
+        .padding(.vertical, 5)
+    }
+
+    // "было → план": previous working weight in grey, planned weight in
+    // progress-green when it's a step up, ink otherwise.
+    private func deltaText(prev: Double?, plan: Double, reps: String, up: Bool) -> Text {
+        let planPart = Text("\(TrainerLogic.formatWeight(plan))кг")
+            .foregroundColor(up ? DesignPalette.ok : DesignPalette.ink)
+            .fontWeight(.bold)
+        let repsPart = Text(" · \(reps)").foregroundColor(DesignPalette.ink4)
+        if let prev {
+            return Text(TrainerLogic.formatWeight(prev)).foregroundColor(DesignPalette.ink4)
+                + Text(" → ").foregroundColor(DesignPalette.ink5)
+                + planPart + repsPart
+        }
+        return planPart + repsPart
+    }
+
+    // MARK: pending / none (glass rows, like the stats strip)
+
+    private var pendingRow: some View {
+        Button {
+            store.currentTab = .trainings
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(DesignPalette.accent.opacity(0.08))
+                        .overlay(Circle().stroke(DesignPalette.accent.opacity(0.18), lineWidth: 0.5))
+                    ProgressView().controlSize(.small).tint(DesignPalette.accent)
+                }
+                .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Совет тренера").tLabel().foregroundStyle(DesignPalette.ink4)
+                    Text("ИИ обновляет план…")
+                        .font(.jbm(13, weight: .semibold))
+                        .foregroundStyle(DesignPalette.ink2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .liquidGlass(radius: 20)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var noneRow: some View {
+        Button {
+            Task { await store.refreshRecommendation() }
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(DesignPalette.accent.opacity(0.12))
+                        .overlay(Circle().stroke(DesignPalette.accent.opacity(0.20), lineWidth: 0.5))
+                    Image(systemName: "sparkles").font(.system(size: 16)).foregroundStyle(DesignPalette.accent)
+                }
+                .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Совет тренера").tLabel().foregroundStyle(DesignPalette.ink4)
+                    Text("Сгенерировать совет")
+                        .font(.jbm(13, weight: .semibold))
+                        .foregroundStyle(DesignPalette.ink)
+                }
+                Spacer(minLength: 8)
+                Text("Создать")
+                    .font(.jbm(12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(DesignPalette.accent, in: Capsule())
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .liquidGlass(radius: 20)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: date of the planned (next) session — today
+
+    private func ruToday(_ format: String) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ru_RU")
+        f.dateFormat = format
+        return f.string(from: Date()).replacingOccurrences(of: ".", with: "")
+    }
+    private var todayDay: String { ruToday("d") }
+    private var todayMonth: String { ruToday("LLL").uppercased() }
+    private var todayWeekday: String { ruToday("EE").uppercased() }
 }
 
 // Date-rail HistoryCard: left 64px column with day number + month label +
